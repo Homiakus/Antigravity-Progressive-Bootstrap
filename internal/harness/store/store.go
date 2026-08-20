@@ -26,6 +26,7 @@ type Reader interface {
 	GetWorkflowProgress(context.Context, harnessmodel.WorkflowRunID) (harnessmodel.WorkflowProgress, error)
 	GetNodeRun(context.Context, harnessmodel.NodeRunID) (harnessmodel.NodeRun, error)
 	GetAttempt(context.Context, harnessmodel.AttemptID) (harnessmodel.Attempt, error)
+	GetFirstAttemptCreatedAt(context.Context, harnessmodel.NodeRunID) (time.Time, error)
 	GetWorker(context.Context, harnessmodel.WorkerID) (harnessmodel.Worker, error)
 	GetCurrentLease(context.Context, harnessmodel.AttemptID) (harnessmodel.Lease, error)
 	ListDependentNodeRuns(context.Context, harnessmodel.WorkflowRunID, harnessmodel.NodeID) ([]harnessmodel.NodeRun, error)
