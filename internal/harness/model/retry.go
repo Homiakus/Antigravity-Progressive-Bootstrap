@@ -99,8 +99,13 @@ const (
 	CircuitHalfOpen CircuitState = "HALF_OPEN"
 )
 
+// CircuitBreaker is durable provider/service protection state. Revision is a
+// monotonic compare-and-swap fence: every committed mutation increments it.
+// This prevents lost failure counts and stale in-flight results from silently
+// overwriting newer OPEN/HALF_OPEN state.
 type CircuitBreaker struct {
 	ServiceKey          string       `json:"serviceKey"`
+	Revision            uint64       `json:"revision"`
 	State               CircuitState `json:"state"`
 	ConsecutiveFailures int          `json:"consecutiveFailures"`
 	FailureThreshold    int          `json:"failureThreshold"`
