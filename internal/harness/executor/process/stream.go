@@ -15,6 +15,7 @@ type streamWriter struct {
 	tail         *ringTail
 	count        *atomic.Int64
 	lastActivity *atomic.Int64
+	activityBase time.Time
 	now          func() time.Time
 }
 
@@ -25,7 +26,7 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	at := w.now().UTC()
 	copyChunk := append([]byte(nil), p...)
 	w.count.Add(int64(len(copyChunk)))
-	w.lastActivity.Store(at.UnixNano())
+	w.lastActivity.Store(time.Since(w.activityBase).Nanoseconds())
 	w.tail.Write(copyChunk)
 	if w.ctx.Err() != nil {
 		// The sink has already failed/cancelled. Keep accepting child output so
