@@ -25,11 +25,15 @@ func NormalizeTTL(ttl time.Duration) (time.Duration, error) {
 	return ttl, nil
 }
 
+func Expired(current harnessmodel.Lease, now time.Time) bool {
+	return !now.Before(current.ExpiresAt)
+}
+
 func ValidateAuthority(current harnessmodel.Lease, workerID harnessmodel.WorkerID, epoch uint64, now time.Time) error {
 	if current.State != harnessmodel.LeaseActive || current.WorkerID != workerID || current.Epoch != epoch {
 		return ErrStaleFence
 	}
-	if now.After(current.ExpiresAt) {
+	if Expired(current, now) {
 		return ErrLeaseExpired
 	}
 	return nil
