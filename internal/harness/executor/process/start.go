@@ -10,55 +10,36 @@ import (
 
 var errStartTimeout = errors.New("process executor: start timeout")
 
-type startOutcome struct {
-	startedAt time.Time
-	tree      processTree
-	err       error
-}
-
+// start keeps Cmd.Start synchronous. The OS process creation call is expected to
+// be short; after it returns we enforce the configured start budget and tear
+// down the just-created process tree before returning a timeout. This avoids a
+// dangerous late-start goroutine that could outlive closed log channels.
 func (e *Executor) start(ctx context.Context, cmd *exec.Cmd, timeout time.Duration) (time.Time, processTree, error) {
-	outcomes := make(chan startOutcome, 1)
-	go func() {
-		if err := cmd.Start(); err != nil {
-			outcomes <- startOutcome{err: err}
-			return
-		}
-		startedAt := e.now().UTC()
-		tree, err := attachProcessTree(cmd)
-		if err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			outcomes <- startOutcome{startedAt: startedAt, err: fmt.Errorf("attach process tree: %w", err)}
-			return
-		}
-		outcomes <- startOutcome{startedAt: startedAt, tree: tree}
-	}()
-
-	var timer *time.Timer
-	if timeout > 0 {
-		timer = time.NewTimer(timeout)
-		defer timer.Stop()
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, nil, err
 	}
-	select {
-	case outcome := <-outcomes:
-		return outcome.startedAt, outcome.tree, outcome.err
-	case <-ctx.Done():
-		cleanupLateStart(cmd, outcomes)
-		return time.Time{}, nil, ctx.Err()
-	case <-timerChan(timer):
-		cleanupLateStart(cmd, outcomes)
+	realStart := time.Now()
+	if err := cmd.Start(); err != nil {
+		return time.Time{}, nil, err
+	}
+	startedAt := e.now().UTC()
+	tree, err := attachProcessTree(cmd)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return time.Time{}, nil, fmt.Errorf("attach process tree: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = tree.HardKill()
+		_ = cmd.Wait()
+		_ = tree.Close()
+		return time.Time{}, nil, err
+	}
+	if timeout > 0 && time.Since(realStart) > timeout {
+		_ = tree.HardKill()
+		_ = cmd.Wait()
+		_ = tree.Close()
 		return time.Time{}, nil, fmt.Errorf("%w after %s", errStartTimeout, timeout)
 	}
-}
-
-func cleanupLateStart(cmd *exec.Cmd, outcomes <-chan startOutcome) {
-	go func() {
-		outcome := <-outcomes
-		if outcome.err != nil || outcome.tree == nil {
-			return
-		}
-		_ = outcome.tree.HardKill()
-		_ = cmd.Wait()
-		_ = outcome.tree.Close()
-	}()
+	return startedAt, tree, nil
 }
