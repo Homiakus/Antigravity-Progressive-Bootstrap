@@ -3,8 +3,14 @@ package sqlite
 func init() {
 	migrations = append(migrations, migration{
 		Version: 5,
-		Name:    "durable_retry_runtime",
+		Name:    "durable_retry_runtime_and_integer_deadlines",
 		SQL: `
+ALTER TABLE ready_queue ADD COLUMN not_before_ns INTEGER;
+CREATE INDEX ready_queue_due_ns
+    ON ready_queue(workflow_run_id, not_before_ns, effective_priority DESC, priority DESC, ready_at, node_run_id);
+CREATE INDEX ready_queue_global_due_ns
+    ON ready_queue(not_before_ns, workflow_run_id, effective_priority DESC, priority DESC, ready_at);
+
 CREATE TABLE retry_schedule (
     node_run_id TEXT PRIMARY KEY,
     workflow_run_id TEXT NOT NULL,
