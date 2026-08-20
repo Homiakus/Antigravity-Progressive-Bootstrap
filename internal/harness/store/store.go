@@ -48,6 +48,7 @@ type Tx interface {
 	CreateNextAttempt(context.Context, harnessmodel.Attempt) (harnessmodel.Attempt, error)
 	CompareAndSwapAttempt(context.Context, harnessmodel.AttemptState, harnessmodel.Attempt) error
 	CreateWorkflowScheduleState(context.Context, harnessmodel.WorkflowScheduleState) error
+	SetWorkflowScheduleWeight(context.Context, harnessmodel.WorkflowRunID, int, time.Time) error
 	EnqueueReadyNode(context.Context, harnessmodel.NodeRunID, time.Time, time.Time, string) error
 	RemoveReadyNode(context.Context, harnessmodel.NodeRunID) error
 	SetReadyWait(context.Context, harnessmodel.NodeRunID, harnessmodel.WaitReason, string, time.Time) error
