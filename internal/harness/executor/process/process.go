@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -18,7 +17,6 @@ import (
 const (
 	defaultTailBytes = 256 * 1024
 	defaultQueueSize = 128
-	streamChunkSize  = 32 * 1024
 	defaultGrace     = 5 * time.Second
 )
 
@@ -106,44 +104,12 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 		sink = harnessexecutor.NopSink{}
 	}
 
-	cmd := exec.Command(prepared.ResolvedPath, req.Args...)
-	cmd.Dir = req.Dir
-	cmd.Env = mergedEnv(req.Env)
-	configureCommand(cmd)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return harnessexecutor.Result{}, fmt.Errorf("open stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return harnessexecutor.Result{}, fmt.Errorf("open stderr pipe: %w", err)
-	}
-
-	startedAt, tree, err := e.start(ctx, cmd, req.Timeouts.Start)
-	if err != nil {
-		result := harnessexecutor.Result{ExecutionID: req.ID, FinishedAt: e.now().UTC(), Error: err.Error()}
-		if errors.Is(err, errStartTimeout) {
-			result.TimedOut = true
-			result.TimeoutClass = "START_TIMEOUT"
-		}
-		return result, err
-	}
-	rp := &runningProcess{id: req.ID, cmd: cmd, tree: tree, startedAt: startedAt, grace: req.GracePeriod, done: make(chan struct{})}
-	if err := e.register(rp); err != nil {
-		_ = tree.HardKill()
-		_ = tree.Close()
-		_ = cmd.Wait()
-		return harnessexecutor.Result{}, err
-	}
-	defer e.unregister(req.ID)
-
-	result := harnessexecutor.Result{ExecutionID: req.ID, PID: cmd.Process.Pid, ExitCode: -1, StartedAt: startedAt}
+	result := harnessexecutor.Result{ExecutionID: req.ID, ExitCode: -1}
 	stdoutTail := newRingTail(req.OutputTailBytes)
 	stderrTail := newRingTail(req.OutputTailBytes)
 	var stdoutBytes atomic.Int64
 	var stderrBytes atomic.Int64
 	var lastActivity atomic.Int64
-	lastActivity.Store(startedAt.UnixNano())
 
 	streamCtx, streamCancel := context.WithCancel(context.Background())
 	defer streamCancel()
@@ -154,26 +120,71 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 	sinkWG.Add(1)
 	go func() {
 		defer sinkWG.Done()
+		failed := false
 		for chunk := range chunks {
+			if failed {
+				continue
+			}
 			if err := sink.WriteChunk(streamCtx, chunk); err != nil {
 				sinkErrMu.Lock()
 				if sinkErr == nil {
 					sinkErr = err
 				}
 				sinkErrMu.Unlock()
-				// Keep draining the bounded channel even after a sink error so the
-				// child cannot deadlock on a full stdout/stderr pipe.
+				failed = true
+				streamCancel()
 			}
 		}
 	}()
 
-	var readWG sync.WaitGroup
-	readWG.Add(2)
-	go streamPipe(stdout, harnessexecutor.StreamStdout, chunks, stdoutTail, &stdoutBytes, &lastActivity, e.now, &readWG)
-	go streamPipe(stderr, harnessexecutor.StreamStderr, chunks, stderrTail, &stderrBytes, &lastActivity, e.now, &readWG)
+	cmd := exec.Command(prepared.ResolvedPath, req.Args...)
+	cmd.Dir = req.Dir
+	cmd.Env = mergedEnv(req.Env)
+	cmd.Stdout = &streamWriter{
+		ctx: streamCtx, stream: harnessexecutor.StreamStdout, chunks: chunks,
+		tail: stdoutTail, count: &stdoutBytes, lastActivity: &lastActivity, now: e.now,
+	}
+	cmd.Stderr = &streamWriter{
+		ctx: streamCtx, stream: harnessexecutor.StreamStderr, chunks: chunks,
+		tail: stderrTail, count: &stderrBytes, lastActivity: &lastActivity, now: e.now,
+	}
+	configureCommand(cmd)
+
+	startedAt, tree, err := e.start(ctx, cmd, req.Timeouts.Start)
+	if err != nil {
+		streamCancel()
+		close(chunks)
+		sinkWG.Wait()
+		result.FinishedAt = e.now().UTC()
+		result.Error = err.Error()
+		if errors.Is(err, errStartTimeout) {
+			result.TimedOut = true
+			result.TimeoutClass = "START_TIMEOUT"
+		}
+		return result, err
+	}
+	lastActivity.Store(startedAt.UnixNano())
+	result.PID = cmd.Process.Pid
+	result.StartedAt = startedAt
+
+	rp := &runningProcess{id: req.ID, cmd: cmd, tree: tree, startedAt: startedAt, grace: req.GracePeriod, done: make(chan struct{})}
+	if err := e.register(rp); err != nil {
+		_ = tree.HardKill()
+		_ = cmd.Wait()
+		_ = tree.Close()
+		streamCancel()
+		close(chunks)
+		sinkWG.Wait()
+		return harnessexecutor.Result{}, err
+	}
+	defer e.unregister(req.ID)
 
 	waitCh := make(chan error, 1)
-	go func() { waitCh <- cmd.Wait() }()
+	go func() {
+		waitErr := cmd.Wait()
+		close(rp.done)
+		waitCh <- waitErr
+	}()
 
 	var waitErr error
 	var timeoutClass string
@@ -192,7 +203,10 @@ waitLoop:
 		case <-ctx.Done():
 			cancelledByContext = true
 			rp.cancelled.Store(true)
-			_ = terminateWithEscalation(ctx, rp, harnessexecutor.CancelGraceful)
+			// Execution cancellation is graceful by default. It is intentionally
+			// detached from the already-cancelled request context so children get
+			// their configured grace period before escalation.
+			_ = terminateWithEscalation(context.Background(), rp, harnessexecutor.CancelGraceful)
 			waitErr = <-waitCh
 			break waitLoop
 		case <-timerChan(execTimer):
@@ -214,10 +228,13 @@ waitLoop:
 			}
 		}
 	}
-	close(rp.done)
-	readWG.Wait()
+
+	// Cmd.Wait returns only after os/exec has finished copying both configured
+	// writers. No child output can be sent after this point, so the bounded
+	// stream channel can now be closed without racing a pipe reader.
 	close(chunks)
 	sinkWG.Wait()
+	streamCancel()
 	_ = tree.Close()
 
 	result.FinishedAt = e.now().UTC()
@@ -292,25 +309,6 @@ func (e *Executor) lookup(id harnessexecutor.ExecutionID) (*runningProcess, bool
 	rp, ok := e.running[id]
 	e.mu.RUnlock()
 	return rp, ok
-}
-
-func streamPipe(r io.Reader, stream harnessexecutor.Stream, chunks chan<- harnessexecutor.LogChunk, tail *ringTail, count *atomic.Int64, lastActivity *atomic.Int64, now func() time.Time, wg *sync.WaitGroup) {
-	defer wg.Done()
-	buf := make([]byte, streamChunkSize)
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			at := now().UTC()
-			copyChunk := append([]byte(nil), buf[:n]...)
-			count.Add(int64(n))
-			lastActivity.Store(at.UnixNano())
-			tail.Write(copyChunk)
-			chunks <- harnessexecutor.LogChunk{At: at, Stream: stream, Data: copyChunk}
-		}
-		if err != nil {
-			return
-		}
-	}
 }
 
 func terminateWithEscalation(ctx context.Context, rp *runningProcess, mode harnessexecutor.CancelMode) error {
