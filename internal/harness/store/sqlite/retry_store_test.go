@@ -169,24 +169,25 @@ func TestRetryBudgetReservationExhaustionAndWindowReset(t *testing.T) {
 	}
 }
 
-func TestCircuitBreakerCASRejectsStaleProbeOwner(t *testing.T) {
+func TestCircuitBreakerCASRejectsStaleRevision(t *testing.T) {
 	ctx := context.Background()
 	db := openTestStore(t)
 	now := time.Unix(12000, 0).UTC()
-	initial := harnessmodel.CircuitBreaker{ServiceKey: "llm", State: harnessmodel.CircuitOpen, ConsecutiveFailures: 3, FailureThreshold: 3, OpenedAt: now, NextProbeAt: now.Add(time.Minute), UpdatedAt: now}
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.UpsertCircuitBreaker(ctx, initial) }); err != nil {
+	initial := harnessmodel.CircuitBreaker{ServiceKey: "llm", Revision: 1, State: harnessmodel.CircuitOpen, ConsecutiveFailures: 3, FailureThreshold: 3, OpenedAt: now, NextProbeAt: now.Add(time.Minute), UpdatedAt: now}
+	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CreateCircuitBreaker(ctx, initial) }); err != nil {
 		t.Fatal(err)
 	}
 	probe := initial
+	probe.Revision = 2
 	probe.State = harnessmodel.CircuitHalfOpen
 	probe.ProbeInFlight = true
 	probe.UpdatedAt = now.Add(time.Minute)
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CompareAndSwapCircuitBreaker(ctx, harnessmodel.CircuitOpen, false, probe) }); err != nil {
+	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CompareAndSwapCircuitBreaker(ctx, 1, probe) }); err != nil {
 		t.Fatal(err)
 	}
 	stale := probe
 	stale.UpdatedAt = stale.UpdatedAt.Add(time.Second)
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CompareAndSwapCircuitBreaker(ctx, harnessmodel.CircuitOpen, false, stale) }); !errors.Is(err, harnessstore.ErrConflict) {
+	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CompareAndSwapCircuitBreaker(ctx, 1, stale) }); !errors.Is(err, harnessstore.ErrConflict) {
 		t.Fatalf("stale circuit CAS=%v want ErrConflict", err)
 	}
 	if err := db.View(ctx, func(reader harnessstore.Reader) error {
@@ -194,7 +195,7 @@ func TestCircuitBreakerCASRejectsStaleProbeOwner(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if got.State != harnessmodel.CircuitHalfOpen || !got.ProbeInFlight {
+		if got.Revision != 2 || got.State != harnessmodel.CircuitHalfOpen || !got.ProbeInFlight {
 			t.Fatalf("unexpected breaker after CAS: %+v", got)
 		}
 		return nil
