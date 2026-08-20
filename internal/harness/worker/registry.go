@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,8 +58,20 @@ func (r *Registry) Register(ctx context.Context, worker harnessmodel.Worker) (ha
 	if !validTrust(worker.Trust) {
 		return harnessmodel.Worker{}, fmt.Errorf("invalid worker trust %q", worker.Trust)
 	}
+
+	// Worker identity is durable. Re-registering the same ID may refresh
+	// capabilities/resources and liveness, but it must never rewrite the
+	// original creation timestamp or return a value that disagrees with the DB.
 	if worker.CreatedAt.IsZero() {
-		worker.CreatedAt = now
+		existing, err := r.Get(ctx, worker.ID)
+		switch {
+		case err == nil:
+			worker.CreatedAt = existing.CreatedAt
+		case errors.Is(err, harnessstore.ErrNotFound):
+			worker.CreatedAt = now
+		default:
+			return harnessmodel.Worker{}, fmt.Errorf("read existing worker %s: %w", worker.ID, err)
+		}
 	}
 	worker.LastSeenAt = now
 	if err := r.store.Update(ctx, func(tx harnessstore.Tx) error { return tx.UpsertWorker(ctx, worker) }); err != nil {
