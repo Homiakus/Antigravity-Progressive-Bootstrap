@@ -26,6 +26,8 @@ type Reader interface {
 	GetWorkflowProgress(context.Context, harnessmodel.WorkflowRunID) (harnessmodel.WorkflowProgress, error)
 	GetNodeRun(context.Context, harnessmodel.NodeRunID) (harnessmodel.NodeRun, error)
 	GetAttempt(context.Context, harnessmodel.AttemptID) (harnessmodel.Attempt, error)
+	GetWorker(context.Context, harnessmodel.WorkerID) (harnessmodel.Worker, error)
+	GetCurrentLease(context.Context, harnessmodel.AttemptID) (harnessmodel.Lease, error)
 	ListDependentNodeRuns(context.Context, harnessmodel.WorkflowRunID, harnessmodel.NodeID) ([]harnessmodel.NodeRun, error)
 	GetReadyNode(context.Context, harnessmodel.NodeRunID) (harnessmodel.ReadyNode, error)
 	ListReadyWorkflowLanes(context.Context, time.Time, int) ([]harnessmodel.WorkflowScheduleState, error)
@@ -47,6 +49,11 @@ type Tx interface {
 	DecrementNodeRemainingDependencies(context.Context, harnessmodel.NodeRunID, time.Time) (int, error)
 	CreateNextAttempt(context.Context, harnessmodel.Attempt) (harnessmodel.Attempt, error)
 	CompareAndSwapAttempt(context.Context, harnessmodel.AttemptState, harnessmodel.Attempt) error
+	UpsertWorker(context.Context, harnessmodel.Worker) error
+	TouchWorker(context.Context, harnessmodel.WorkerID, time.Time) error
+	CreateLease(context.Context, harnessmodel.Lease) error
+	RenewLease(context.Context, harnessmodel.AttemptID, harnessmodel.WorkerID, uint64, time.Time, time.Time) (harnessmodel.Lease, error)
+	CloseLease(context.Context, harnessmodel.AttemptID, harnessmodel.WorkerID, uint64, harnessmodel.LeaseState, time.Time) error
 	CreateWorkflowScheduleState(context.Context, harnessmodel.WorkflowScheduleState) error
 	SetWorkflowScheduleWeight(context.Context, harnessmodel.WorkflowRunID, int, time.Time) error
 	EnqueueReadyNode(context.Context, harnessmodel.NodeRunID, time.Time, time.Time, string) error
