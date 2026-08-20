@@ -64,18 +64,15 @@ func (e *Engine) completeAttemptFailureWithRetry(ctx context.Context, attemptID 
 	if err != nil {
 		return RetryFailureResult{}, err
 	}
+	reason := "retry policy selected terminal failure"
+	if budgetDenied {
+		reason = "retry budget exhausted"
+	}
 	return RetryFailureResult{
 		Completion: terminal,
-		Decision: harnessretry.Decision{Retry: false, Reason: terminalReason(err, budgetDenied)},
+		Decision: harnessretry.Decision{Retry: false, Reason: reason},
 		Terminal: true, BudgetDenied: budgetDenied,
 	}, nil
-}
-
-func terminalReason(_ error, budgetDenied bool) string {
-	if budgetDenied {
-		return "retry budget exhausted"
-	}
-	return "retry policy selected terminal failure"
 }
 
 func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.AttemptID, failure harnessmodel.Failure, fence *completionFence) (RetryFailureResult, error) {
@@ -95,14 +92,23 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 				return err
 			}
 			schedule, err := tx.GetRetrySchedule(ctx, nr.ID)
-			if err == nil && schedule.FailedAttemptID == attempt.ID {
-				run, _ := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
-				result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
-				result.Decision = harnessretry.Decision{Retry: true, NotBefore: schedule.NotBefore, Delay: schedule.NotBefore.Sub(schedule.ScheduledAt), Reason: "retry already scheduled"}
-				result.RetrySchedule = &schedule
-				return nil
+			if err != nil {
+				if errors.Is(err, harnessstore.ErrNotFound) {
+					return errRetryTerminal
+				}
+				return err
 			}
-			return errRetryTerminal
+			if schedule.FailedAttemptID != attempt.ID {
+				return fmt.Errorf("retry schedule for node %s belongs to attempt %s, not %s: %w", nr.ID, schedule.FailedAttemptID, attempt.ID, harnessstore.ErrConflict)
+			}
+			run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
+			if err != nil {
+				return err
+			}
+			result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
+			result.Decision = harnessretry.Decision{Retry: true, NotBefore: schedule.NotBefore, Delay: schedule.NotBefore.Sub(schedule.ScheduledAt), Reason: "retry already scheduled"}
+			result.RetrySchedule = &schedule
+			return nil
 		}
 		if attempt.State != harnessmodel.AttemptRunning {
 			return fmt.Errorf("cannot retry failure attempt %s from state %s", attempt.ID, attempt.State)
