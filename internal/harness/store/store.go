@@ -32,6 +32,10 @@ type Reader interface {
 	GetReadyNode(context.Context, harnessmodel.NodeRunID) (harnessmodel.ReadyNode, error)
 	ListReadyWorkflowLanes(context.Context, time.Time, int) ([]harnessmodel.WorkflowScheduleState, error)
 	ListReadyNodes(context.Context, harnessmodel.WorkflowRunID, time.Time, int) ([]harnessmodel.ReadyNode, error)
+	GetRetrySchedule(context.Context, harnessmodel.NodeRunID) (harnessmodel.RetrySchedule, error)
+	ListDueRetries(context.Context, time.Time, int) ([]harnessmodel.RetrySchedule, error)
+	GetRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string) (harnessmodel.RetryBudget, error)
+	GetCircuitBreaker(context.Context, string) (harnessmodel.CircuitBreaker, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -60,5 +64,10 @@ type Tx interface {
 	RemoveReadyNode(context.Context, harnessmodel.NodeRunID) error
 	SetReadyWait(context.Context, harnessmodel.NodeRunID, harnessmodel.WaitReason, string, time.Time) error
 	RecordWorkflowService(context.Context, harnessmodel.WorkflowRunID, time.Time) error
+	CreateRetrySchedule(context.Context, harnessmodel.RetrySchedule) error
+	DeleteRetrySchedule(context.Context, harnessmodel.NodeRunID) error
+	ReserveRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string, time.Duration, int, time.Time) (harnessmodel.RetryBudget, bool, error)
+	UpsertCircuitBreaker(context.Context, harnessmodel.CircuitBreaker) error
+	CompareAndSwapCircuitBreaker(context.Context, harnessmodel.CircuitState, bool, harnessmodel.CircuitBreaker) error
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
