@@ -44,9 +44,19 @@ func TestVersionFivePinsRetryAndCircuitFenceColumns(t *testing.T) {
 			t.Fatalf("v5 schema missing %s.%s", table, column)
 		}
 	}
+	assertObject := func(kind, name string) {
+		t.Helper()
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type=? AND name=?`, kind, name).Scan(&got); err != nil {
+			t.Fatalf("v5 schema missing %s %s: %v", kind, name, err)
+		}
+	}
 
 	assertColumn("ready_queue", "not_before_ns")
 	assertColumn("retry_schedule", "not_before_ns")
+	assertColumn("retry_schedule_history", "not_before_ns")
 	assertColumn("retry_budgets", "window_start_ns")
 	assertColumn("circuit_breakers", "revision")
+	assertObject("table", "retry_schedule_history")
+	assertObject("trigger", "retry_schedule_journal_insert")
 }
