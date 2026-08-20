@@ -43,10 +43,10 @@ func (t *transaction) EnqueueReadyNode(ctx context.Context, nodeRunID harnessmod
 	res, err := t.tx.ExecContext(ctx, `
 INSERT INTO ready_queue(
     node_run_id, workflow_run_id, priority, effective_priority,
-    ready_at, not_before, resource_class, wait_reason, wait_detail, updated_at
+    ready_at, not_before, not_before_ns, resource_class, wait_reason, wait_detail, updated_at
 )
 SELECT nr.id, nr.workflow_run_id, nr.priority, nr.effective_priority,
-       ?, ?, ?, '', '', ?
+       ?, ?, ?, ?, '', '', ?
 FROM node_runs nr
 WHERE nr.id=? AND nr.state=?
 ON CONFLICT(node_run_id) DO UPDATE SET
@@ -55,11 +55,12 @@ ON CONFLICT(node_run_id) DO UPDATE SET
     effective_priority=excluded.effective_priority,
     ready_at=excluded.ready_at,
     not_before=excluded.not_before,
+    not_before_ns=excluded.not_before_ns,
     resource_class=excluded.resource_class,
     wait_reason='',
     wait_detail='',
     updated_at=excluded.updated_at`,
-		formatTime(readyAt), nullableTime(notBefore), resourceClass, formatTime(readyAt), string(nodeRunID), string(harnessmodel.NodeReady))
+		formatTime(readyAt), nullableTime(notBefore), nullableUnixNano(notBefore), resourceClass, formatTime(readyAt), string(nodeRunID), string(harnessmodel.NodeReady))
 	if err != nil {
 		return fmt.Errorf("enqueue ready node: %w", err)
 	}
@@ -136,13 +137,13 @@ WHERE wr.state=?
       JOIN node_runs nr ON nr.id=rq.node_run_id
       WHERE rq.workflow_run_id=ws.workflow_run_id
         AND nr.state=?
-        AND (rq.not_before IS NULL OR rq.not_before<=?)
+        AND (rq.not_before_ns IS NULL OR rq.not_before_ns<=?)
   )
 ORDER BY (CAST(ws.service_count AS REAL) / CAST(ws.weight AS REAL)) ASC,
          CASE WHEN ws.last_selected_at IS NULL THEN 0 ELSE 1 END ASC,
          ws.last_selected_at ASC,
          ws.workflow_run_id ASC
-LIMIT ?`, string(harnessmodel.WorkflowRunning), string(harnessmodel.NodeReady), formatTime(now), limit)
+LIMIT ?`, string(harnessmodel.WorkflowRunning), string(harnessmodel.NodeReady), now.UnixNano(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list ready workflow lanes: %w", err)
 	}
@@ -192,10 +193,10 @@ func (t *transaction) ListReadyNodes(ctx context.Context, runID harnessmodel.Wor
 	rows, err := t.tx.QueryContext(ctx, readyNodeSelect+`
 WHERE rq.workflow_run_id=?
   AND nr.state=?
-  AND (rq.not_before IS NULL OR rq.not_before<=?)
+  AND (rq.not_before_ns IS NULL OR rq.not_before_ns<=?)
 ORDER BY CASE WHEN rq.wait_reason='' THEN 0 ELSE 1 END ASC,
          rq.effective_priority DESC, rq.priority DESC, rq.ready_at ASC, rq.node_run_id ASC
-LIMIT ?`, string(runID), string(harnessmodel.NodeReady), formatTime(now), limit)
+LIMIT ?`, string(runID), string(harnessmodel.NodeReady), now.UnixNano(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list ready nodes: %w", err)
 	}
@@ -242,4 +243,11 @@ func scanReadyNode(row interface{ Scan(...any) error }) (harnessmodel.ReadyNode,
 	}
 	node.Resources = spec.Resources
 	return node, nil
+}
+
+func nullableUnixNano(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UnixNano()
 }
