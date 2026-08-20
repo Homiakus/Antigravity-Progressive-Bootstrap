@@ -34,13 +34,14 @@ type Executor struct {
 }
 
 type runningProcess struct {
-	id        harnessexecutor.ExecutionID
-	cmd       *exec.Cmd
-	tree      processTree
-	startedAt time.Time
-	grace     time.Duration
-	done      chan struct{}
-	cancelled atomic.Bool
+	id           harnessexecutor.ExecutionID
+	cmd          *exec.Cmd
+	tree         processTree
+	startedAt    time.Time
+	grace        time.Duration
+	done         chan struct{}
+	cancelStream context.CancelFunc
+	cancelled    atomic.Bool
 }
 
 type Options struct {
@@ -185,12 +186,15 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 	result.PID = cmd.Process.Pid
 	result.StartedAt = startedAt
 
-	rp := &runningProcess{id: req.ID, cmd: cmd, tree: tree, startedAt: startedAt, grace: req.GracePeriod, done: make(chan struct{})}
+	rp := &runningProcess{
+		id: req.ID, cmd: cmd, tree: tree, startedAt: startedAt, grace: req.GracePeriod,
+		done: make(chan struct{}), cancelStream: streamCancel,
+	}
 	if err := e.activate(rp); err != nil {
+		streamCancel()
 		_ = tree.HardKill()
 		_ = cmd.Wait()
 		_ = tree.Close()
-		streamCancel()
 		close(chunks)
 		sinkWG.Wait()
 		return harnessexecutor.Result{}, err
@@ -222,15 +226,16 @@ waitLoop:
 		case <-ctx.Done():
 			cancelledByContext = true
 			rp.cancelled.Store(true)
-			// Execution cancellation is graceful by default. It is intentionally
-			// detached from the already-cancelled request context so children get
-			// their configured grace period before escalation.
+			// Break downstream backpressure before waiting for process-tree
+			// termination. Writers keep draining child output but drop chunks.
+			streamCancel()
 			_ = terminateWithEscalation(context.Background(), rp, harnessexecutor.CancelGraceful)
 			waitErr = <-waitCh
 			break waitLoop
 		case <-timerChan(execTimer):
 			timedOut = true
 			timeoutClass = "EXECUTION_TIMEOUT"
+			streamCancel()
 			_ = terminateWithEscalation(context.Background(), rp, harnessexecutor.CancelGraceful)
 			waitErr = <-waitCh
 			break waitLoop
@@ -240,6 +245,7 @@ waitLoop:
 				if e.now().UTC().Sub(last) >= req.Timeouts.Idle {
 					timedOut = true
 					timeoutClass = "IDLE_TIMEOUT"
+					streamCancel()
 					_ = terminateWithEscalation(context.Background(), rp, harnessexecutor.CancelGraceful)
 					waitErr = <-waitCh
 					break waitLoop
@@ -296,6 +302,9 @@ func (e *Executor) Cancel(ctx context.Context, id harnessexecutor.ExecutionID, m
 		return ErrNotRunning
 	}
 	rp.cancelled.Store(true)
+	if mode != harnessexecutor.CancelSoft && rp.cancelStream != nil {
+		rp.cancelStream()
+	}
 	return terminateWithEscalation(ctx, rp, mode)
 }
 
