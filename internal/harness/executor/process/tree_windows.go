@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"sync"
 	"syscall"
 	"unsafe"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type windowsProcessTree struct {
+	mu  sync.Mutex
 	job windows.Handle
 	pid uint32
 }
@@ -115,6 +117,8 @@ func (t *windowsProcessTree) GracefulTerminate() error {
 }
 
 func (t *windowsProcessTree) HardKill() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.job == 0 {
 		return nil
 	}
@@ -125,6 +129,8 @@ func (t *windowsProcessTree) HardKill() error {
 }
 
 func (t *windowsProcessTree) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.job == 0 {
 		return nil
 	}
