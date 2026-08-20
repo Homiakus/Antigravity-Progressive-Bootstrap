@@ -92,23 +92,41 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 				return err
 			}
 			schedule, err := tx.GetRetrySchedule(ctx, nr.ID)
-			if err != nil {
-				if errors.Is(err, harnessstore.ErrNotFound) {
-					return errRetryTerminal
+			if err == nil {
+				if schedule.FailedAttemptID != attempt.ID {
+					return fmt.Errorf("retry schedule for node %s belongs to attempt %s, not %s: %w", nr.ID, schedule.FailedAttemptID, attempt.ID, harnessstore.ErrConflict)
 				}
-				return err
+				run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
+				if err != nil {
+					return err
+				}
+				result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
+				result.Decision = harnessretry.Decision{Retry: true, NotBefore: schedule.NotBefore, Delay: schedule.NotBefore.Sub(schedule.ScheduledAt), Reason: "retry already scheduled"}
+				result.RetrySchedule = &schedule
+				return nil
 			}
-			if schedule.FailedAttemptID != attempt.ID {
-				return fmt.Errorf("retry schedule for node %s belongs to attempt %s, not %s: %w", nr.ID, schedule.FailedAttemptID, attempt.ID, harnessstore.ErrConflict)
+			if !errors.Is(err, harnessstore.ErrNotFound) {
+				return err
 			}
 			run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
 			if err != nil {
 				return err
 			}
 			result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
-			result.Decision = harnessretry.Decision{Retry: true, NotBefore: schedule.NotBefore, Delay: schedule.NotBefore.Sub(schedule.ScheduledAt), Reason: "retry already scheduled"}
-			result.RetrySchedule = &schedule
-			return nil
+			// Active retry schedules are intentionally deleted once RETRY_WAIT is
+			// released. A late duplicate for that failed Attempt must preserve the
+			// original retry decision instead of being misreported as terminal.
+			switch nr.State {
+			case harnessmodel.NodeReady, harnessmodel.NodeQueued, harnessmodel.NodeRunning,
+				harnessmodel.NodeWaiting, harnessmodel.NodeInDoubt, harnessmodel.NodeUnschedulable,
+				harnessmodel.NodeSucceeded, harnessmodel.NodeTimedOut, harnessmodel.NodeCancelled:
+				result.Decision = harnessretry.Decision{Retry: true, Reason: "retry already released or advanced"}
+				return nil
+			case harnessmodel.NodeRetryWait:
+				return fmt.Errorf("node %s is RETRY_WAIT but durable retry schedule is missing: %w", nr.ID, harnessstore.ErrConflict)
+			default:
+				return errRetryTerminal
+			}
 		}
 		if attempt.State != harnessmodel.AttemptRunning {
 			return fmt.Errorf("cannot retry failure attempt %s from state %s", attempt.ID, attempt.State)
