@@ -12,7 +12,7 @@ var currentHarnessTables = []string{
 	"schema_migrations", "workflow_definitions", "workflow_runs", "graph_revisions",
 	"nodes", "dependencies", "node_runs", "attempts", "events", "outbox",
 	"workflow_progress", "ready_queue", "workflow_schedule_state", "workers", "leases",
-	"retry_schedule", "retry_budgets", "circuit_breakers",
+	"retry_schedule", "retry_schedule_history", "retry_budgets", "circuit_breakers",
 }
 
 func assertCurrentSchema(t *testing.T, ctx context.Context, db *DB) {
@@ -169,7 +169,7 @@ func TestVersionFourToFiveCreatesRetryRuntimeConstraints(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, name := range []string{"retry_schedule_due", "retry_budgets_window", "circuit_breakers_by_state_probe"} {
+	for _, name := range []string{"retry_schedule_due", "retry_schedule_history_by_node", "retry_budgets_window", "circuit_breakers_by_state_probe"} {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v5 index %s: %v", name, err)
