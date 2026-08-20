@@ -5,19 +5,29 @@ import (
 	"fmt"
 	"time"
 
+	harnesslease "github.com/homiakus/agctl/internal/harness/lease"
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	harnessstate "github.com/homiakus/agctl/internal/harness/state"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
 type CompletionResult struct {
-	Attempt        harnessmodel.Attempt     `json:"attempt"`
-	NodeRun        harnessmodel.NodeRun     `json:"nodeRun"`
-	WorkflowRun    harnessmodel.WorkflowRun `json:"workflowRun"`
+	Attempt         harnessmodel.Attempt      `json:"attempt"`
+	NodeRun         harnessmodel.NodeRun      `json:"nodeRun"`
+	WorkflowRun     harnessmodel.WorkflowRun  `json:"workflowRun"`
 	ReadyNodeRunIDs []harnessmodel.NodeRunID `json:"readyNodeRunIds,omitempty"`
-	Idempotent     bool                     `json:"idempotent,omitempty"`
+	Idempotent      bool                      `json:"idempotent,omitempty"`
 }
 
+type completionFence struct {
+	WorkerID harnessmodel.WorkerID
+	Epoch    uint64
+}
+
+// StartAttempt is the transitional unleased compatibility path used by legacy
+// Stage 3 callers/tests. New runtime code must use ClaimNode +
+// StartClaimedAttempt. Unfenced completion below explicitly rejects any Attempt
+// whose LeaseEpoch is non-zero, so this helper cannot bypass lease ownership.
 func (e *Engine) StartAttempt(ctx context.Context, nodeRunID harnessmodel.NodeRunID) (harnessmodel.Attempt, error) {
 	if nodeRunID == "" {
 		return harnessmodel.Attempt{}, fmt.Errorf("node run id is required")
@@ -60,10 +70,10 @@ func (e *Engine) StartAttempt(ctx context.Context, nodeRunID harnessmodel.NodeRu
 		if err := transitionAttempt(ctx, tx, &attempt, harnessmodel.AttemptRunning); err != nil {
 			return err
 		}
-		if _, err := e.appendEvent(ctx, tx, nr.WorkflowRunID, now, "NodeQueued", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID}); err != nil {
+		if _, err := e.appendEvent(ctx, tx, nr.WorkflowRunID, now, "NodeQueued", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "compatibilityUnleased": true}); err != nil {
 			return err
 		}
-		if _, err := e.appendEvent(ctx, tx, nr.WorkflowRunID, now, "AttemptStarted", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number}); err != nil {
+		if _, err := e.appendEvent(ctx, tx, nr.WorkflowRunID, now, "AttemptStarted", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number, "compatibilityUnleased": true}); err != nil {
 			return err
 		}
 		return nil
@@ -75,6 +85,17 @@ func (e *Engine) StartAttempt(ctx context.Context, nodeRunID harnessmodel.NodeRu
 }
 
 func (e *Engine) CompleteAttemptSuccess(ctx context.Context, attemptID harnessmodel.AttemptID) (CompletionResult, error) {
+	return e.completeAttemptSuccess(ctx, attemptID, nil)
+}
+
+func (e *Engine) CompleteAttemptSuccessFenced(ctx context.Context, attemptID harnessmodel.AttemptID, workerID harnessmodel.WorkerID, epoch uint64) (CompletionResult, error) {
+	if workerID == "" || epoch == 0 {
+		return CompletionResult{}, fmt.Errorf("worker id and lease epoch are required")
+	}
+	return e.completeAttemptSuccess(ctx, attemptID, &completionFence{WorkerID: workerID, Epoch: epoch})
+}
+
+func (e *Engine) completeAttemptSuccess(ctx context.Context, attemptID harnessmodel.AttemptID, fence *completionFence) (CompletionResult, error) {
 	if attemptID == "" {
 		return CompletionResult{}, fmt.Errorf("attempt id is required")
 	}
@@ -86,6 +107,9 @@ func (e *Engine) CompleteAttemptSuccess(ctx context.Context, attemptID harnessmo
 			return err
 		}
 		if attempt.State == harnessmodel.AttemptSucceeded {
+			if err := authorizeTerminalDuplicate(attempt, fence); err != nil {
+				return err
+			}
 			result.Attempt = attempt
 			result.Idempotent = true
 			if nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID); err == nil {
@@ -96,6 +120,9 @@ func (e *Engine) CompleteAttemptSuccess(ctx context.Context, attemptID harnessmo
 		}
 		if attempt.State != harnessmodel.AttemptRunning {
 			return fmt.Errorf("cannot succeed attempt %s from state %s", attempt.ID, attempt.State)
+		}
+		if err := authorizeCompletion(ctx, tx, attempt, fence, now); err != nil {
+			return err
 		}
 		nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID)
 		if err != nil {
@@ -116,11 +143,16 @@ func (e *Engine) CompleteAttemptSuccess(ctx context.Context, attemptID harnessmo
 		if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeSucceeded, now); err != nil {
 			return err
 		}
+		if fence != nil {
+			if err := tx.CloseLease(ctx, attempt.ID, fence.WorkerID, fence.Epoch, harnessmodel.LeaseReleased, now); err != nil {
+				return err
+			}
+		}
 		progress, err := tx.IncrementWorkflowProgress(ctx, run.ID, false, now)
 		if err != nil {
 			return err
 		}
-		if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptSucceeded", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number}); err != nil {
+		if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptSucceeded", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number, "workerId": attempt.WorkerID, "leaseEpoch": attempt.LeaseEpoch}); err != nil {
 			return err
 		}
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeSucceeded", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID}); err != nil {
@@ -170,6 +202,17 @@ func (e *Engine) CompleteAttemptSuccess(ctx context.Context, attemptID harnessmo
 }
 
 func (e *Engine) CompleteAttemptFailure(ctx context.Context, attemptID harnessmodel.AttemptID, errorClass, errorMessage string) (CompletionResult, error) {
+	return e.completeAttemptFailure(ctx, attemptID, errorClass, errorMessage, nil)
+}
+
+func (e *Engine) CompleteAttemptFailureFenced(ctx context.Context, attemptID harnessmodel.AttemptID, workerID harnessmodel.WorkerID, epoch uint64, errorClass, errorMessage string) (CompletionResult, error) {
+	if workerID == "" || epoch == 0 {
+		return CompletionResult{}, fmt.Errorf("worker id and lease epoch are required")
+	}
+	return e.completeAttemptFailure(ctx, attemptID, errorClass, errorMessage, &completionFence{WorkerID: workerID, Epoch: epoch})
+}
+
+func (e *Engine) completeAttemptFailure(ctx context.Context, attemptID harnessmodel.AttemptID, errorClass, errorMessage string, fence *completionFence) (CompletionResult, error) {
 	if attemptID == "" {
 		return CompletionResult{}, fmt.Errorf("attempt id is required")
 	}
@@ -181,6 +224,9 @@ func (e *Engine) CompleteAttemptFailure(ctx context.Context, attemptID harnessmo
 			return err
 		}
 		if attempt.State == harnessmodel.AttemptFailed {
+			if err := authorizeTerminalDuplicate(attempt, fence); err != nil {
+				return err
+			}
 			result.Attempt = attempt
 			result.Idempotent = true
 			if nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID); err == nil {
@@ -191,6 +237,9 @@ func (e *Engine) CompleteAttemptFailure(ctx context.Context, attemptID harnessmo
 		}
 		if attempt.State != harnessmodel.AttemptRunning {
 			return fmt.Errorf("cannot fail attempt %s from state %s", attempt.ID, attempt.State)
+		}
+		if err := authorizeCompletion(ctx, tx, attempt, fence, now); err != nil {
+			return err
 		}
 		nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID)
 		if err != nil {
@@ -213,11 +262,16 @@ func (e *Engine) CompleteAttemptFailure(ctx context.Context, attemptID harnessmo
 		if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeFailed, now); err != nil {
 			return err
 		}
+		if fence != nil {
+			if err := tx.CloseLease(ctx, attempt.ID, fence.WorkerID, fence.Epoch, harnessmodel.LeaseReleased, now); err != nil {
+				return err
+			}
+		}
 		progress, err := tx.IncrementWorkflowProgress(ctx, run.ID, true, now)
 		if err != nil {
 			return err
 		}
-		if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptFailed", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number, "errorClass": errorClass, "error": errorMessage}); err != nil {
+		if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptFailed", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "attemptNumber": attempt.Number, "errorClass": errorClass, "error": errorMessage, "workerId": attempt.WorkerID, "leaseEpoch": attempt.LeaseEpoch}); err != nil {
 			return err
 		}
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeFailed", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "errorClass": errorClass}); err != nil {
@@ -235,6 +289,29 @@ func (e *Engine) CompleteAttemptFailure(ctx context.Context, attemptID harnessmo
 		return nil
 	})
 	return result, err
+}
+
+func authorizeCompletion(ctx context.Context, tx harnessstore.Tx, attempt harnessmodel.Attempt, fence *completionFence, now time.Time) error {
+	if fence == nil {
+		if attempt.LeaseEpoch != 0 || attempt.WorkerID != "" {
+			return fmt.Errorf("attempt %s is lease-owned; fenced completion is required", attempt.ID)
+		}
+		return nil
+	}
+	return authorizeLease(ctx, tx, attempt, fence.WorkerID, fence.Epoch, now)
+}
+
+func authorizeTerminalDuplicate(attempt harnessmodel.Attempt, fence *completionFence) error {
+	if fence == nil {
+		if attempt.LeaseEpoch != 0 || attempt.WorkerID != "" {
+			return fmt.Errorf("attempt %s is lease-owned; fenced completion is required", attempt.ID)
+		}
+		return nil
+	}
+	if attempt.WorkerID != fence.WorkerID || attempt.LeaseEpoch != fence.Epoch {
+		return harnesslease.ErrStaleFence
+	}
+	return nil
 }
 
 func transitionNode(ctx context.Context, tx harnessstore.Tx, nr *harnessmodel.NodeRun, target harnessmodel.NodeState, at time.Time) error {
