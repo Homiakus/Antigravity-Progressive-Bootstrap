@@ -60,11 +60,7 @@ func (m Model) View() string {
 		sb.WriteString("\n")
 	}
 
-	hintText := "1..6 Перейти • Tab Окно"
-	if i18n.CurrentLanguage() == i18n.LangEN {
-		hintText = "1..6 Jump • Tab Move"
-	}
-	sb.WriteString(t.Muted.Render(hintText))
+	sb.WriteString(t.Muted.Render(i18n.T("hint_jump")))
 
 	boxStyle := t.SidebarBox
 	if m.Focused {

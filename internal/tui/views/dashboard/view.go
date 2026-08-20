@@ -12,13 +12,14 @@ import (
 	"github.com/homiakus/agctl/internal/router"
 	"github.com/homiakus/agctl/internal/skills"
 	"github.com/homiakus/agctl/internal/tasks"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
 type QuickAction struct {
-	ID    string
-	Title string
-	Desc  string
+	ID       string
+	KeyTitle string
+	KeyDesc  string
 }
 
 type Model struct {
@@ -39,11 +40,11 @@ func New(p paths.Paths) Model {
 	m := Model{
 		Paths: p,
 		QuickActions: []QuickAction{
-			{ID: "install-rec", Title: "Recommended Install", Desc: "Install core meta-skills & hooks"},
-			{ID: "install-full", Title: "Full Stable Setup", Desc: "Install all packs and verify MCP"},
-			{ID: "doctor", Title: "Run Doctor Diagnostics", Desc: "Audit environment and tools"},
-			{ID: "probe-mcp", Title: "Live Probe MCP Servers", Desc: "Measure real latency & active tools"},
-			{ID: "sync-skills", Title: "Sync Recommended Skills", Desc: "Update Superpowers & Gemini packs"},
+			{ID: "install-rec", KeyTitle: "dash_act_rec", KeyDesc: "dash_act_rec_d"},
+			{ID: "install-full", KeyTitle: "dash_act_full", KeyDesc: "dash_act_full_d"},
+			{ID: "doctor", KeyTitle: "dash_act_doc", KeyDesc: "dash_act_doc_d"},
+			{ID: "probe-mcp", KeyTitle: "dash_act_probe", KeyDesc: "dash_act_probe_d"},
+			{ID: "sync-skills", KeyTitle: "dash_act_sync", KeyDesc: "dash_act_sync_d"},
 		},
 	}
 	m.Refresh()
@@ -67,9 +68,9 @@ func (m *Model) Refresh() {
 
 	docRep := doctor.Run(m.Paths, "")
 	if docRep.HasErrors() {
-		m.DoctorStatus = "✕ ERRORS"
+		m.DoctorStatus = "status_errors"
 	} else {
-		m.DoctorStatus = "● HEALTHY"
+		m.DoctorStatus = "status_healthy"
 	}
 }
 
@@ -102,15 +103,26 @@ func (m Model) View() string {
 	var sb strings.Builder
 
 	// Top Section: Metrics
-	sb.WriteString(t.MicroLabel.Render("SYSTEM OVERVIEW & METRICS") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("dash_metrics")) + "\n\n")
 
-	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render("Router:"), t.Bold.Render(m.RouterState)))
-	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render("Loop:"), t.Bold.Render(m.LoopState)))
-	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render("Health:"), t.BadgeSuccess.Render(m.DoctorStatus)))
-	sb.WriteString(fmt.Sprintf("  %s %s\n\n", t.ItemNormal.Render("Inventory:"), t.Bold.Render(fmt.Sprintf("%d Skills • %d MCP • %d Tasks", m.SkillsCount, m.MCPCount, m.TasksCount))))
+	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render(i18n.T("dash_router")), t.Bold.Render(m.RouterState)))
+	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render(i18n.T("dash_loop")), t.Bold.Render(m.LoopState)))
+
+	statusText := i18n.T(m.DoctorStatus)
+	statusStyle := t.BadgeSuccess
+	if m.DoctorStatus == "status_errors" {
+		statusStyle = t.BadgeError
+	}
+	sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render(i18n.T("dash_health")), statusStyle.Render("● "+statusText)))
+
+	invStr := fmt.Sprintf("%d Skills • %d MCP • %d Tasks", m.SkillsCount, m.MCPCount, m.TasksCount)
+	if i18n.CurrentLanguage() == i18n.LangRU {
+		invStr = fmt.Sprintf("%d Навыков • %d MCP серверов • %d Задач", m.SkillsCount, m.MCPCount, m.TasksCount)
+	}
+	sb.WriteString(fmt.Sprintf("  %s %s\n\n", t.ItemNormal.Render(i18n.T("dash_inventory")), t.Bold.Render(invStr)))
 
 	// Middle Section: Quick Actions
-	sb.WriteString(t.MicroLabel.Render("QUICK ACTIONS") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("dash_actions")) + "\n\n")
 	for i, act := range m.QuickActions {
 		isSel := i == m.Cursor
 		prefix := "  "
@@ -120,11 +132,11 @@ func (m Model) View() string {
 			titleStyle = t.ItemActive
 		}
 
-		title := titleStyle.Render(act.Title)
-		desc := t.Muted.Render(" — " + act.Desc)
+		title := titleStyle.Render(i18n.T(act.KeyTitle))
+		desc := t.Muted.Render(" — " + i18n.T(act.KeyDesc))
 		sb.WriteString(prefix + title + desc + "\n")
 	}
 
-	sb.WriteString("\n" + t.Muted.Render("Enter execute • Tab panel switch"))
+	sb.WriteString("\n" + t.Muted.Render(i18n.T("dash_footer")))
 	return sb.String()
 }

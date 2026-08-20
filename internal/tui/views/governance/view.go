@@ -10,6 +10,7 @@ import (
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/permissions"
 	"github.com/homiakus/agctl/internal/securityaudit"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
@@ -90,11 +91,11 @@ func (m Model) View() string {
 	t := theme.Current()
 	var sb strings.Builder
 
-	sb.WriteString(t.MicroLabel.Render("GOVERNANCE, SECURITY & RECOVERY") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("gov_title")) + "\n\n")
 
-	tab1 := " 1. Permissions "
-	tab2 := " 2. Security "
-	tab3 := " 3. Backups "
+	tab1 := " " + i18n.T("gov_tab_perm") + " "
+	tab2 := " " + i18n.T("gov_tab_sec") + " "
+	tab3 := " " + i18n.T("gov_tab_bkp") + " "
 	switch m.ActiveSec {
 	case SecPermissions:
 		tab1 = t.Key.Render(tab1)
@@ -113,19 +114,29 @@ func (m Model) View() string {
 
 	switch m.ActiveSec {
 	case SecPermissions:
-		sb.WriteString(t.Bold.Render("Permission Execution Policies") + "\n\n")
-		st := "Safe (prompts required for all operations)"
+		sb.WriteString(t.Bold.Render(i18n.T("gov_policy_title")) + "\n\n")
+		st := "Safe (ручное подтверждение действий)"
 		if m.PermAudit.ToolPermission == "always-proceed" {
-			st = "Autonomous (unattended safe sandbox execution)"
+			st = "Autonomous (автономное безопасное исполнение)"
 		}
-		sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render("Tool Policy:"), t.Bold.Render(st)))
-		sb.WriteString(fmt.Sprintf("  %s %s\n\n", t.ItemNormal.Render("Review Policy:"), t.Bold.Render(m.PermAudit.ArtifactReview)))
-		sb.WriteString(t.Muted.Render("  Press Space or Enter to toggle mode.\n"))
+		if i18n.CurrentLanguage() == i18n.LangEN {
+			st = "Safe (prompts required)"
+			if m.PermAudit.ToolPermission == "always-proceed" {
+				st = "Autonomous (sandbox execution)"
+			}
+		}
+		sb.WriteString(fmt.Sprintf("  %s %s\n", t.ItemNormal.Render(i18n.T("gov_policy_tool")), t.Bold.Render(st)))
+		sb.WriteString(fmt.Sprintf("  %s %s\n\n", t.ItemNormal.Render(i18n.T("gov_policy_rev")), t.Bold.Render(m.PermAudit.ArtifactReview)))
+		toggleHint := "  Нажмите Пробел или Enter для переключения режима.\n"
+		if i18n.CurrentLanguage() == i18n.LangEN {
+			toggleHint = "  Press Space or Enter to toggle mode.\n"
+		}
+		sb.WriteString(t.Muted.Render(toggleHint))
 
 	case SecSecurity:
-		sb.WriteString(t.Bold.Render(fmt.Sprintf("Security Score: %d / 100", m.AuditReport.Score)) + "\n\n")
+		sb.WriteString(t.Bold.Render(fmt.Sprintf("%s %d / 100", i18n.T("gov_sec_score"), m.AuditReport.Score)) + "\n\n")
 		if len(m.AuditReport.Findings) == 0 {
-			sb.WriteString(t.BadgeSuccess.Render("  ● No security vulnerabilities or unsafe permission leaks detected.\n"))
+			sb.WriteString(t.BadgeSuccess.Render("  "+i18n.T("gov_sec_ok")+"\n"))
 		} else {
 			for i, f := range m.AuditReport.Findings {
 				if i >= 4 {
@@ -140,9 +151,13 @@ func (m Model) View() string {
 		}
 
 	case SecBackups:
-		sb.WriteString(t.Bold.Render(fmt.Sprintf("Snapshots (%d total)", len(m.BackupList))) + "\n\n")
+		bkpCountTxt := fmt.Sprintf("%s (%d всего)", i18n.T("gov_bkp_title"), len(m.BackupList))
+		if i18n.CurrentLanguage() == i18n.LangEN {
+			bkpCountTxt = fmt.Sprintf("%s (%d total)", i18n.T("gov_bkp_title"), len(m.BackupList))
+		}
+		sb.WriteString(t.Bold.Render(bkpCountTxt) + "\n\n")
 		if len(m.BackupList) == 0 {
-			sb.WriteString(t.Muted.Render("  No backups created yet.\n"))
+			sb.WriteString(t.Muted.Render("  "+i18n.T("gov_bkp_none")+"\n"))
 		} else {
 			for i, b := range m.BackupList {
 				if i >= 4 {
@@ -153,6 +168,6 @@ func (m Model) View() string {
 		}
 	}
 
-	sb.WriteString("\n" + t.Muted.Render("← / → switch tabs • Tab next panel"))
+	sb.WriteString("\n" + t.Muted.Render(i18n.T("gov_footer")))
 	return sb.String()
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/router"
 	"github.com/homiakus/agctl/internal/tasks"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
@@ -84,17 +85,17 @@ func (m Model) View() string {
 	t := theme.Current()
 	var sb strings.Builder
 
-	sb.WriteString(t.MicroLabel.Render("AUTONOMY ENGINE & ORCHESTRATION") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("auto_title")) + "\n\n")
 
 	items := []struct {
 		Label string
 		Value string
 		Desc  string
 	}{
-		{Label: "Adaptive Router", Value: fmt.Sprintf("%v", m.RouterConf.Enabled), Desc: "Intercepts requests & routes to smallest capability set"},
-		{Label: "Router Mode", Value: m.RouterConf.Mode, Desc: "transparent vs balanced vs maximum"},
-		{Label: "Autonomous Loop", Value: fmt.Sprintf("%v", m.LoopConf.Enabled), Desc: "Evaluates goals until verification passes"},
-		{Label: "Loop Permission", Value: m.LoopConf.PermissionMode, Desc: "guarded vs unrestricted"},
+		{Label: i18n.T("auto_router"), Value: fmt.Sprintf("%v", m.RouterConf.Enabled), Desc: i18n.T("auto_router_d")},
+		{Label: i18n.T("auto_rmode"), Value: m.RouterConf.Mode, Desc: i18n.T("auto_rmode_d")},
+		{Label: i18n.T("auto_loop"), Value: fmt.Sprintf("%v", m.LoopConf.Enabled), Desc: i18n.T("auto_loop_d")},
+		{Label: i18n.T("auto_lperm"), Value: m.LoopConf.PermissionMode, Desc: i18n.T("auto_lperm_d")},
 	}
 
 	for i, item := range items {
@@ -112,9 +113,13 @@ func (m Model) View() string {
 		sb.WriteString(t.Muted.Render("    "+item.Desc) + "\n\n")
 	}
 
-	sb.WriteString(t.MicroLabel.Render("HEADLESS TASK QUEUE: ") + t.Bold.Render(fmt.Sprintf("%d tasks", len(m.TaskList))) + "\n")
+	tasksCountTxt := fmt.Sprintf("%d задач", len(m.TaskList))
+	if i18n.CurrentLanguage() == i18n.LangEN {
+		tasksCountTxt = fmt.Sprintf("%d tasks", len(m.TaskList))
+	}
+	sb.WriteString(t.MicroLabel.Render(i18n.T("auto_queue")) + t.Bold.Render(tasksCountTxt) + "\n")
 	if len(m.TaskList) == 0 {
-		sb.WriteString(t.Muted.Render("  No queued tasks running.\n"))
+		sb.WriteString(t.Muted.Render("  "+i18n.T("auto_no_tasks")+"\n"))
 	} else {
 		for i, tk := range m.TaskList {
 			if i >= 3 {
@@ -122,14 +127,14 @@ func (m Model) View() string {
 			}
 			st := t.BadgeNeutral.Render(tk.Status)
 			if tk.Status == tasks.StatusRunning {
-				st = t.BadgeInfo.Render("◌ running")
+				st = t.BadgeInfo.Render("◌ " + i18n.T("status_running"))
 			} else if tk.Status == tasks.StatusSucceeded {
-				st = t.BadgeSuccess.Render("● completed")
+				st = t.BadgeSuccess.Render("● " + i18n.T("status_healthy"))
 			}
 			sb.WriteString(fmt.Sprintf("  • %s %s\n", t.Bold.Render(tk.ID), st))
 		}
 	}
 
-	sb.WriteString("\n" + t.Muted.Render("Space/Enter toggle parameter • Tab switch panel"))
+	sb.WriteString("\n" + t.Muted.Render(i18n.T("auto_footer")))
 	return sb.String()
 }

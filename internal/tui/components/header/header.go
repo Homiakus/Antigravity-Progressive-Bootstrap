@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
@@ -20,8 +21,8 @@ func New(version string) Model {
 	return Model{
 		Title:       "agctl",
 		Version:     version,
-		Breadcrumbs: []string{"DASHBOARD"},
-		StatusText:  "READY",
+		Breadcrumbs: []string{i18n.T("sec_dashboard")},
+		StatusText:  "status_ready",
 		StatusType:  "ok",
 	}
 }
@@ -35,24 +36,29 @@ func (m Model) View() string {
 	crumbsStyled := t.Subtitle.Render(crumbs)
 	left := appName + "  " + crumbsStyled
 
-	// Right: Status indicator
+	// Right: Status indicator with i18n
+	statusTranslated := i18n.T(m.StatusText)
+	if statusTranslated == m.StatusText && !strings.HasPrefix(m.StatusText, "status_") {
+		// Already custom translated string
+		statusTranslated = m.StatusText
+	}
+
 	var statusBadge string
 	switch m.StatusType {
 	case "ok":
-		statusBadge = t.BadgeSuccess.Render("● " + m.StatusText)
+		statusBadge = t.BadgeSuccess.Render("● " + statusTranslated)
 	case "warn":
-		statusBadge = t.BadgeWarning.Render("! " + m.StatusText)
+		statusBadge = t.BadgeWarning.Render("! " + statusTranslated)
 	case "err":
-		statusBadge = t.BadgeError.Render("✕ " + m.StatusText)
+		statusBadge = t.BadgeError.Render("✕ " + statusTranslated)
 	case "busy":
-		statusBadge = t.BadgeInfo.Render("◌ " + m.StatusText)
+		statusBadge = t.BadgeInfo.Render("◌ " + statusTranslated)
 	default:
-		statusBadge = t.BadgeNeutral.Render("○ " + m.StatusText)
+		statusBadge = t.BadgeNeutral.Render("○ " + statusTranslated)
 	}
 
 	leftLen := lipgloss.Width(left)
 	rightLen := lipgloss.Width(statusBadge)
-	// HeaderBox has Padding(0, 1), so inner width is m.Width - 2
 	innerW := m.Width - 2
 	if innerW < 10 {
 		innerW = 10

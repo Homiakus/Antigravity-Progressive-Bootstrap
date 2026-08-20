@@ -63,7 +63,6 @@ type AppModel struct {
 type LogMsg string
 
 func NewApp(p paths.Paths) AppModel {
-	// Initialize stored settings (Language, Theme, Accent)
 	_ = i18n.LoadSettings(p.AppRoot)
 
 	commands := []palette.CommandItem{
@@ -86,10 +85,17 @@ func NewApp(p paths.Paths) AppModel {
 	sb.Focused = true
 
 	con := console.New()
-	con.Add("[INFO] agctl 3.2.1 initialized (RU default). 3-column desktop layout.")
-	con.Add("[INFO] Tab / Shift+Tab switches panels. 1..6 direct jump.")
+	if i18n.CurrentLanguage() == i18n.LangRU {
+		con.Add("[INFO] agctl 3.2.1 инициализирован (Русский интерфейс по умолчанию).")
+		con.Add("[INFO] 3-колоночный интерфейс: Меню слева, Рабочая зона в центре, Консоль справа.")
+		con.Add("[INFO] Клавишами 1..6 переход в разделы, Tab / Shift+Tab смена окна.")
+	} else {
+		con.Add("[INFO] agctl 3.2.1 initialized (Desktop 3-column layout).")
+		con.Add("[INFO] Left Sidebar, Center Workspace, Right Live Console.")
+		con.Add("[INFO] 1..6 jump to section, Tab / Shift+Tab cycle panels.")
+	}
 
-	return AppModel{
+	app := AppModel{
 		Paths:        p,
 		Focus:        FocusSidebar,
 		Sidebar:      sb,
@@ -107,6 +113,9 @@ func NewApp(p paths.Paths) AppModel {
 		GovView:      governance.New(p),
 		SettingsView: settings.New(p),
 	}
+	app.syncFocus()
+	app.updateBreadcrumbs()
+	return app
 }
 
 func (m AppModel) Init() tea.Cmd {
@@ -133,17 +142,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			panelH = 5
 		}
 
-		// Exact 3-column width math
-		sidebarW := 24
-		consoleW := msg.Width / 3
-		if consoleW < 32 {
-			consoleW = 32
-		} else if consoleW > 50 {
-			consoleW = 50
+		// Exact 3-column width math (Sidebar 30 chars for full Russian titles)
+		sidebarW := 30
+		consoleW := msg.Width * 38 / 100
+		if consoleW < 34 {
+			consoleW = 34
+		} else if consoleW > 55 {
+			consoleW = 55
 		}
 		centerW := msg.Width - sidebarW - consoleW - 2
-		if centerW < 25 {
-			centerW = 25
+		if centerW < 28 {
+			centerW = 28
 		}
 
 		m.Sidebar.Width = sidebarW
@@ -168,6 +177,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LogMsg:
 		m.Console.Add(string(msg))
+		return m, nil
+
+	case setup.OpCompletedMsg:
+		for _, line := range msg.Output {
+			m.Console.Add(line)
+		}
+		if msg.Success {
+			m.Console.Add("[SUCCESS] Операция успешно завершена.")
+		} else if msg.Err != nil {
+			m.Console.Add(fmt.Sprintf("[ERROR] Ошибка выполнения: %v", msg.Err))
+		}
 		return m, nil
 
 	case toast.ClearToastMsg:
@@ -395,15 +415,15 @@ func (m *AppModel) syncFocus() {
 		m.StatusBar.Hints = []statusbar.KeyHint{
 			{Key: "↑↓", Desc: moveText},
 			{Key: "enter/space", Desc: execText},
-			{Key: "←", Desc: "sidebar"},
-			{Key: "→", Desc: "console"},
+			{Key: "←", Desc: i18n.T("hint_sidebar")},
+			{Key: "→", Desc: i18n.T("hint_console")},
 			{Key: "tab", Desc: panelText},
 			{Key: "?", Desc: helpText},
 		}
 	case FocusConsole:
 		m.StatusBar.Hints = []statusbar.KeyHint{
 			{Key: "c", Desc: i18n.T("hint_clear")},
-			{Key: "←", Desc: "workspace"},
+			{Key: "←", Desc: i18n.T("hint_workspace")},
 			{Key: "tab", Desc: panelText},
 			{Key: "?", Desc: helpText},
 		}
@@ -444,71 +464,94 @@ func (m AppModel) ExecutePaletteCommand(id string) (AppModel, tea.Cmd) {
 
 	case "install-rec":
 		m.setSection(1)
-		m.Console.Add("[CMD] Starting Recommended Install...")
+		m.Console.Add("[CMD] > agctl install recommended")
+		m.Console.Add("[EXEC] Установка базовых мета-скиллов и системного бинарника...")
 		return m, func() tea.Msg {
 			r, err := installer.Recommended(p, false)
 			if err != nil {
-				return LogMsg(fmt.Sprintf("[ERROR] Recommended install failed: %v", err))
+				return LogMsg(fmt.Sprintf("[ERROR] Ошибка установки: %v", err))
 			}
-			return LogMsg(fmt.Sprintf("[SUCCESS] Installed binary: %s | Skill packs: %v", r.InstalledBinary, r.SkillPackCounts))
+			return LogMsg(fmt.Sprintf("[SUCCESS] Бинарник установлен: %s\n[OK] Пакеты скиллов: %v", r.InstalledBinary, r.SkillPackCounts))
 		}
 
 	case "install-full":
 		m.setSection(1)
-		m.Console.Add("[CMD] Starting Full Stable Setup...")
+		m.Console.Add("[CMD] > agctl install full --prereqs")
+		m.Console.Add("[EXEC] Запуск полной установки всех компонентов...")
 		return m, func() tea.Msg {
 			r, err := installer.Full(p, false)
 			if err != nil {
-				return LogMsg(fmt.Sprintf("[ERROR] Full setup failed: %v", err))
+				return LogMsg(fmt.Sprintf("[ERROR] Ошибка полной установки: %v", err))
 			}
-			return LogMsg(fmt.Sprintf("[SUCCESS] Full setup complete: %s | Packs: %v", r.InstalledBinary, r.SkillPackCounts))
+			res := fmt.Sprintf("[SUCCESS] Полная установка завершена: %s\n[OK] Пакеты: %v", r.InstalledBinary, r.SkillPackCounts)
+			for _, w := range r.MCPWarnings {
+				res += fmt.Sprintf("\n[WARN] %s", w)
+			}
+			return LogMsg(res)
 		}
 
 	case "doctor":
 		m.setSection(1)
-		m.Console.Add("[CMD] Running Doctor Diagnostics...")
+		m.Console.Add("[CMD] > agctl doctor --self-test")
+		m.Console.Add("[EXEC] Запуск комплексного аудита окружения...")
 		return m, func() tea.Msg {
 			doc := doctor.RunAdvanced(p, "", false)
 			if doc.HasErrors() {
-				return LogMsg(fmt.Sprintf("[WARN] Doctor found %d warnings/errors", len(doc.Findings)))
+				res := fmt.Sprintf("[WARN] Doctor обнаружил %d замечаний:", len(doc.Findings))
+				for _, f := range doc.Findings {
+					res += fmt.Sprintf("\n  [%s] %s: %s", f.Level, f.Area, f.Message)
+				}
+				return LogMsg(res)
 			}
-			return LogMsg(fmt.Sprintf("[OK] Doctor audit passed (%d checks healthy)", len(doc.Findings)))
+			res := fmt.Sprintf("[OK] Комплексный аудит Doctor пройден (%d проверок успешно):", len(doc.Findings))
+			for _, f := range doc.Findings {
+				res += fmt.Sprintf("\n  ● %s: %s", f.Area, f.Message)
+			}
+			return LogMsg(res)
 		}
 
 	case "probe", "probe-mcp":
 		m.setSection(2)
-		m.Console.Add("[CMD] Probing active MCP servers...")
+		m.Console.Add("[CMD] > agctl mcp probe")
+		m.Console.Add("[EXEC] Опрос времени отклика и инструментов всех MCP серверов...")
 		return m, func() tea.Msg {
 			rep := mcpprobe.ProbeAll(p, "", 8*time.Second)
 			healthy := 0
+			res := "[OK] Результаты Live Probe MCP:"
 			for _, r := range rep {
 				if r.OK {
 					healthy++
+					res += fmt.Sprintf("\n  ● [OK] %s: %dms (инструментов: %d)", r.Name, r.LatencyMS, len(r.Tools))
+				} else {
+					res += fmt.Sprintf("\n  ✕ [FAIL] %s: %s", r.Name, r.Error)
 				}
 			}
-			return LogMsg(fmt.Sprintf("[OK] MCP Probe complete: %d / %d healthy", healthy, len(rep)))
+			res += fmt.Sprintf("\n[SUCCESS] Итог: %d из %d серверов активны и готовы к работе.", healthy, len(rep))
+			return LogMsg(res)
 		}
 
 	case "sync-skills":
 		m.setSection(2)
-		m.Console.Add("[CMD] Synchronizing recommended skill packs...")
+		m.Console.Add("[CMD] > agctl skills sync-recommended")
+		m.Console.Add("[EXEC] Синхронизация репозиториев скиллов...")
 		return m, func() tea.Msg {
 			r, err := skills.SyncRecommended(p)
 			if err != nil {
-				return LogMsg(fmt.Sprintf("[ERROR] Sync skills failed: %v", err))
+				return LogMsg(fmt.Sprintf("[ERROR] Ошибка синхронизации: %v", err))
 			}
-			return LogMsg(fmt.Sprintf("[SUCCESS] Sync skills complete: %v", r))
+			return LogMsg(fmt.Sprintf("[SUCCESS] Синхронизация завершена успешно:\n[OK] Результат: %v", r))
 		}
 
 	case "self":
-		m.Console.Add("[CMD] Updating self binary & hooks...")
+		m.Console.Add("[CMD] > agctl install self")
+		m.Console.Add("[EXEC] Перекомпиляция agctl и регистрация хуков жизненного цикла...")
 		return m, func() tea.Msg {
 			b, err := installer.InstallSelf(p)
 			if err != nil {
-				return LogMsg(fmt.Sprintf("[ERROR] Install self failed: %v", err))
+				return LogMsg(fmt.Sprintf("[ERROR] Ошибка компиляции: %v", err))
 			}
 			_ = hooks.Install(p, b)
-			return LogMsg(fmt.Sprintf("[SUCCESS] Self binary installed: %s", b))
+			return LogMsg(fmt.Sprintf("[SUCCESS] Бинарник установлен: %s\n[OK] Хуки зарегистрированы.", b))
 		}
 	}
 	return m, nil

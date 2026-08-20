@@ -10,6 +10,7 @@ import (
 	"github.com/homiakus/agctl/internal/mcpprobe"
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/skills"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
@@ -125,11 +126,11 @@ func (m Model) View() string {
 	var sb strings.Builder
 
 	// Top Sub-tabs
-	sb.WriteString(t.MicroLabel.Render("CAPABILITIES & RUNTIME EXTENSIONS") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("caps_title")) + "\n\n")
 
-	tab1 := " 1. Skills "
-	tab2 := " 2. MCP Servers "
-	tab3 := " 3. Skill Packs "
+	tab1 := " " + i18n.T("caps_tab_skills") + " "
+	tab2 := " " + i18n.T("caps_tab_mcp") + " "
+	tab3 := " " + i18n.T("caps_tab_packs") + " "
 	switch m.ActiveSub {
 	case SubSkills:
 		tab1 = t.Key.Render(tab1)
@@ -148,7 +149,11 @@ func (m Model) View() string {
 
 	items := m.currentItems()
 	if len(items) == 0 {
-		sb.WriteString(t.Muted.Render("  No items installed.\n"))
+		emptyTxt := "  Нет установленных элементов.\n"
+		if i18n.CurrentLanguage() == i18n.LangEN {
+			emptyTxt = "  No items installed.\n"
+		}
+		sb.WriteString(t.Muted.Render(emptyTxt))
 	} else {
 		maxShow := 8
 		start := 0
@@ -176,7 +181,7 @@ func (m Model) View() string {
 	sb.WriteString("\n")
 	if len(items) > 0 && m.Cursor < len(items) {
 		selectedName := items[m.Cursor]
-		sb.WriteString(t.MicroLabel.Render("DETAILS: ") + t.Bold.Render(selectedName) + "\n")
+		sb.WriteString(t.MicroLabel.Render(i18n.T("caps_details")) + t.Bold.Render(selectedName) + "\n")
 
 		switch m.ActiveSub {
 		case SubSkills:
@@ -188,25 +193,29 @@ func (m Model) View() string {
 			}
 		case SubMCP:
 			if m.Probing {
-				sb.WriteString(t.BadgeInfo.Render("◌ Probing latency...") + "\n")
+				sb.WriteString(t.BadgeInfo.Render("◌ "+i18n.T("status_running")+" (Ping MCP)...") + "\n")
 			} else if len(m.ProbeReport) > 0 {
 				for _, res := range m.ProbeReport {
 					if res.Name == selectedName {
 						if res.OK {
-							sb.WriteString(t.BadgeSuccess.Render(fmt.Sprintf("● Healthy (Latency: %dms)", res.LatencyMS)) + "\n")
+							sb.WriteString(t.BadgeSuccess.Render(fmt.Sprintf("● Доступен (Latency: %dms, Tools: %d)", res.LatencyMS, len(res.Tools))) + "\n")
 						} else {
-							sb.WriteString(t.BadgeError.Render(fmt.Sprintf("✕ Unhealthy: %s", res.Error)) + "\n")
+							sb.WriteString(t.BadgeError.Render(fmt.Sprintf("✕ Ошибка: %s", res.Error)) + "\n")
 						}
 					}
 				}
 			} else {
-				sb.WriteString(t.Muted.Render("Press 'r' to probe server latency & tools") + "\n")
+				sb.WriteString(t.Muted.Render(i18n.T("caps_probe_hint")) + "\n")
 			}
 		case SubPacks:
-			sb.WriteString(t.Muted.Render("Press Enter to synchronize pack from Dashboard") + "\n")
+			hintTxt := "Нажмите Enter на Главной для синхронизации пакета"
+			if i18n.CurrentLanguage() == i18n.LangEN {
+				hintTxt = "Press Enter on Dashboard to synchronize pack"
+			}
+			sb.WriteString(t.Muted.Render(hintTxt) + "\n")
 		}
 	}
 
-	sb.WriteString("\n" + t.Muted.Render("← / → switch tabs • ↑ / ↓ select"))
+	sb.WriteString("\n" + t.Muted.Render(i18n.T("caps_footer")))
 	return sb.String()
 }

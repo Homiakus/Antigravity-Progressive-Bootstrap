@@ -30,14 +30,22 @@ func New() Model {
 	return m
 }
 
+// Add appends a log entry, splitting multiline strings into individual lines
 func (m *Model) Add(text string) {
 	ts := time.Now().Format("15:04:05")
-	m.Logs = append(m.Logs, LogEntry{
-		Timestamp: ts,
-		Text:      text,
-	})
-	if len(m.Logs) > 300 {
-		m.Logs = m.Logs[len(m.Logs)-300:]
+	lines := strings.Split(text, "\n")
+	for _, l := range lines {
+		l = strings.TrimRight(l, "\r")
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		m.Logs = append(m.Logs, LogEntry{
+			Timestamp: ts,
+			Text:      l,
+		})
+	}
+	if len(m.Logs) > 1000 {
+		m.Logs = m.Logs[len(m.Logs)-1000:]
 	}
 }
 
@@ -67,7 +75,7 @@ func (m Model) View() string {
 		innerHeight = 3
 	}
 
-	// Header with i18n
+	// Header
 	sb.WriteString(t.ConsoleTitle.Render("> "+i18n.T("live_console")) + "\n\n")
 
 	maxLines := innerHeight - 2
@@ -75,24 +83,55 @@ func (m Model) View() string {
 		maxLines = 1
 	}
 
-	start := 0
-	if len(m.Logs) > maxLines {
-		start = len(m.Logs) - maxLines
+	// Prepare wrapped render lines
+	type renderLine struct {
+		ts   string
+		text string
 	}
+	var rendered []renderLine
 
+	// Available width for log text after timestamp "[15:04:05] " (11 chars)
 	maxTextWidth := innerWidth - 11
-	if maxTextWidth < 10 {
-		maxTextWidth = 10
+	if maxTextWidth < 12 {
+		maxTextWidth = 12
 	}
 
-	for i := start; i < len(m.Logs); i++ {
-		entry := m.Logs[i]
-		ts := t.ConsoleTimestamp.Render("[" + entry.Timestamp + "] ")
+	for _, entry := range m.Logs {
+		text := entry.Text
+		// Wrap line if it exceeds maxTextWidth
+		if len(text) <= maxTextWidth {
+			rendered = append(rendered, renderLine{ts: entry.Timestamp, text: text})
+		} else {
+			// Multi-line wrap
+			remaining := text
+			first := true
+			for len(remaining) > 0 {
+				chunkLen := maxTextWidth
+				if len(remaining) < chunkLen {
+					chunkLen = len(remaining)
+				}
+				chunk := remaining[:chunkLen]
+				remaining = remaining[chunkLen:]
 
-		line := entry.Text
-		if len(line) > maxTextWidth {
-			line = line[:maxTextWidth-3] + "..."
+				if first {
+					rendered = append(rendered, renderLine{ts: entry.Timestamp, text: chunk})
+					first = false
+				} else {
+					rendered = append(rendered, renderLine{ts: "        ", text: "  " + chunk})
+				}
+			}
 		}
+	}
+
+	start := 0
+	if len(rendered) > maxLines {
+		start = len(rendered) - maxLines
+	}
+
+	for i := start; i < len(rendered); i++ {
+		r := rendered[i]
+		ts := t.ConsoleTimestamp.Render("[" + r.ts + "] ")
+		line := r.text
 
 		var lineContent string
 		if strings.HasPrefix(line, "[OK]") || strings.HasPrefix(line, "[SUCCESS]") {

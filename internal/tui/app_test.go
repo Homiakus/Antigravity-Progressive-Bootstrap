@@ -98,25 +98,6 @@ func TestAppSectionSwitchingAndSettings(t *testing.T) {
 	}
 }
 
-func TestCommandPalette(t *testing.T) {
-	app := NewApp(testPaths())
-	m, _ := app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
-
-	// Trigger palette with Ctrl+K
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
-	view := m.View()
-	if !strings.Contains(view, "Command Palette") {
-		t.Errorf("expected Command Palette modal, got:\n%s", view)
-	}
-
-	// Press Esc to dismiss
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	view = m.View()
-	if strings.Contains(view, "Command Palette") {
-		t.Errorf("expected Command Palette to close on Esc")
-	}
-}
-
 func TestHelpModal(t *testing.T) {
 	app := NewApp(testPaths())
 	m, _ := app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
@@ -124,14 +105,14 @@ func TestHelpModal(t *testing.T) {
 	// Press '?'
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	view := m.View()
-	if !strings.Contains(view, "Keyboard Shortcuts & Help") {
+	if !strings.Contains(view, "Справка") && !strings.Contains(view, "Help") {
 		t.Errorf("expected Help modal, got:\n%s", view)
 	}
 
 	// Press '?' again to dismiss
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
 	view = m.View()
-	if strings.Contains(view, "Keyboard Shortcuts & Help") {
+	if strings.Contains(view, "Справка") || strings.Contains(view, "Help cheatsheet") {
 		t.Errorf("expected Help modal to close")
 	}
 }

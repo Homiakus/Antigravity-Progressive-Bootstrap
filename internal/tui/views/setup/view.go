@@ -10,23 +10,24 @@ import (
 	"github.com/homiakus/agctl/internal/hooks"
 	"github.com/homiakus/agctl/internal/installer"
 	"github.com/homiakus/agctl/internal/paths"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
 type SetupOption struct {
-	ID    string
-	Title string
-	Desc  string
+	ID       string
+	KeyTitle string
+	KeyDesc  string
 }
 
 type Model struct {
-	Paths       paths.Paths
-	Options     []SetupOption
-	Cursor      int
-	Running     bool
-	ActiveOp    string
-	Width       int
-	Height      int
+	Paths    paths.Paths
+	Options  []SetupOption
+	Cursor   int
+	Running  bool
+	ActiveOp string
+	Width    int
+	Height   int
 }
 
 type OpCompletedMsg struct {
@@ -40,11 +41,11 @@ func New(p paths.Paths) Model {
 	return Model{
 		Paths: p,
 		Options: []SetupOption{
-			{ID: "rec", Title: "Recommended Install", Desc: "Install embedded skills, hooks & core binary"},
-			{ID: "full", Title: "Full Stable Setup", Desc: "Install all packs, sidecars and probe all MCP"},
-			{ID: "doctor", Title: "Doctor Diagnostics", Desc: "Run comprehensive environment check"},
-			{ID: "prereq", Title: "Check Prerequisites", Desc: "Verify Git, Go, Node.js, Ripgrep"},
-			{ID: "self", Title: "Install/Update agctl Binary & Hooks", Desc: "Compile self into bin and register hooks"},
+			{ID: "rec", KeyTitle: "setup_rec", KeyDesc: "setup_rec_d"},
+			{ID: "full", KeyTitle: "setup_full", KeyDesc: "setup_full_d"},
+			{ID: "doctor", KeyTitle: "setup_doc", KeyDesc: "setup_doc_d"},
+			{ID: "prereq", KeyTitle: "setup_prereq", KeyDesc: "setup_prereq_d"},
+			{ID: "self", KeyTitle: "setup_self", KeyDesc: "setup_self_d"},
 		},
 	}
 }
@@ -81,7 +82,7 @@ func (m *Model) StartSelected() (Model, tea.Cmd) {
 	}
 	opt := m.Options[m.Cursor]
 	m.Running = true
-	m.ActiveOp = opt.Title
+	m.ActiveOp = i18n.T(opt.KeyTitle)
 
 	p := m.Paths
 	return *m, func() tea.Msg {
@@ -93,48 +94,54 @@ func (m *Model) StartSelected() (Model, tea.Cmd) {
 			r, e := installer.Recommended(p, false)
 			err = e
 			if e == nil {
-				out = append(out, fmt.Sprintf("Installed binary: %s", r.InstalledBinary))
-				out = append(out, fmt.Sprintf("Skill packs: %v", r.SkillPackCounts))
+				out = append(out, fmt.Sprintf("[OK] Установлен бинарник: %s", r.InstalledBinary))
+				out = append(out, fmt.Sprintf("[OK] Установлены пакеты скиллов: %v", r.SkillPackCounts))
+			} else {
+				out = append(out, fmt.Sprintf("[ERROR] Ошибка установки: %v", e))
 			}
 		case "full":
 			r, e := installer.Full(p, false)
 			err = e
 			if e == nil {
-				out = append(out, fmt.Sprintf("Installed binary: %s", r.InstalledBinary))
-				out = append(out, fmt.Sprintf("Skill packs: %v", r.SkillPackCounts))
-				if len(r.MCPWarnings) > 0 {
-					out = append(out, fmt.Sprintf("Warnings: %v", r.MCPWarnings))
+				out = append(out, fmt.Sprintf("[OK] Полная установка завершена: %s", r.InstalledBinary))
+				out = append(out, fmt.Sprintf("[OK] Пакеты: %v", r.SkillPackCounts))
+				for _, w := range r.MCPWarnings {
+					out = append(out, fmt.Sprintf("[WARN] MCP: %s", w))
 				}
+			} else {
+				out = append(out, fmt.Sprintf("[ERROR] Ошибка: %v", e))
 			}
 		case "doctor":
 			doc := doctor.RunAdvanced(p, "", false)
 			if doc.HasErrors() {
-				out = append(out, "[ERROR] Doctor found configuration/environment issues")
+				out = append(out, "[WARN] Doctor обнаружил замечания по конфигурации:")
 			} else {
-				out = append(out, "[OK] Doctor environment check PASSED")
+				out = append(out, "[OK] Комплексная проверка Doctor PASSED (все проверки здоровы):")
 			}
 			for _, finding := range doc.Findings {
-				out = append(out, fmt.Sprintf("[%s] %s: %s", finding.Level, finding.Area, finding.Message))
+				out = append(out, fmt.Sprintf("  [%s] %s: %s", finding.Level, finding.Area, finding.Message))
 			}
 		case "prereq":
 			tools := []string{"git", "go", "node", "npm", "rg"}
 			for _, tool := range tools {
 				if path, e := exec.LookPath(tool); e == nil {
-					out = append(out, fmt.Sprintf("[OK] %s at: %s", tool, path))
+					out = append(out, fmt.Sprintf("[OK] %s найден по пути: %s", tool, path))
 				} else {
-					out = append(out, fmt.Sprintf("[MISSING] %s not in PATH", tool))
+					out = append(out, fmt.Sprintf("[WARN] %s отсутствует в переменной PATH", tool))
 				}
 			}
 		case "self":
 			b, e := installer.InstallSelf(p)
 			err = e
 			if e == nil {
-				out = append(out, fmt.Sprintf("Binary installed: %s", b))
+				out = append(out, fmt.Sprintf("[OK] Бинарник скомпилирован в: %s", b))
 				if e2 := hooks.Install(p, b); e2 != nil {
-					out = append(out, fmt.Sprintf("Hooks warning: %v", e2))
+					out = append(out, fmt.Sprintf("[WARN] Регистрация хуков: %v", e2))
 				} else {
-					out = append(out, "Lifecycle hooks registered successfully.")
+					out = append(out, "[OK] Хуки жизненного цикла зарегистрированы успешно.")
 				}
+			} else {
+				out = append(out, fmt.Sprintf("[ERROR] Ошибка сборки: %v", e))
 			}
 		}
 
@@ -151,10 +158,11 @@ func (m Model) View() string {
 	t := theme.Current()
 	var sb strings.Builder
 
-	sb.WriteString(t.MicroLabel.Render("SETUP, PREREQUISITES & DOCTOR DIAGNOSTICS") + "\n\n")
+	sb.WriteString(t.MicroLabel.Render(i18n.T("setup_title")) + "\n\n")
 
 	if m.Running {
-		sb.WriteString(t.BadgeInfo.Render("◌ Running: "+m.ActiveOp) + "\n\n")
+		runningTxt := "◌ " + i18n.T("status_running") + ": " + m.ActiveOp
+		sb.WriteString(t.BadgeInfo.Render(runningTxt) + "\n\n")
 	}
 
 	for i, opt := range m.Options {
@@ -165,11 +173,11 @@ func (m Model) View() string {
 			prefix = t.Symbols.ArrowRight + " "
 			titleStyle = t.ItemActive
 		}
-		title := titleStyle.Render(opt.Title)
-		desc := t.Muted.Render("    " + opt.Desc)
+		title := titleStyle.Render(i18n.T(opt.KeyTitle))
+		desc := t.Muted.Render("    " + i18n.T(opt.KeyDesc))
 		sb.WriteString(prefix + title + "\n" + desc + "\n\n")
 	}
 
-	sb.WriteString(t.Muted.Render("Press Enter to execute • Results stream to Live Console"))
+	sb.WriteString(t.Muted.Render(i18n.T("setup_footer")))
 	return sb.String()
 }
