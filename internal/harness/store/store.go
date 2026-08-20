@@ -34,6 +34,7 @@ type Reader interface {
 	ListReadyWorkflowLanes(context.Context, time.Time, int) ([]harnessmodel.WorkflowScheduleState, error)
 	ListReadyNodes(context.Context, harnessmodel.WorkflowRunID, time.Time, int) ([]harnessmodel.ReadyNode, error)
 	GetRetrySchedule(context.Context, harnessmodel.NodeRunID) (harnessmodel.RetrySchedule, error)
+	GetRetryScheduleByAttempt(context.Context, harnessmodel.AttemptID) (harnessmodel.RetrySchedule, error)
 	ListDueRetries(context.Context, time.Time, int) ([]harnessmodel.RetrySchedule, error)
 	GetRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string) (harnessmodel.RetryBudget, error)
 	GetCircuitBreaker(context.Context, string) (harnessmodel.CircuitBreaker, error)
