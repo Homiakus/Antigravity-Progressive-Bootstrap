@@ -78,6 +78,7 @@ type RuntimeState string
 
 const (
 	RuntimeUnknown  RuntimeState = "UNKNOWN"
+	RuntimeStarting RuntimeState = "STARTING"
 	RuntimeRunning  RuntimeState = "RUNNING"
 	RuntimeFinished RuntimeState = "FINISHED"
 )
