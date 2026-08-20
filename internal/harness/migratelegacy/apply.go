@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
@@ -46,6 +47,9 @@ func Apply(ctx context.Context, target harnessstore.Store, bundle Bundle) (Apply
 		if err := tx.CreateWorkflowProgress(ctx, harnessmodel.WorkflowProgress{WorkflowRunID: bundle.Run.ID, TotalNodes: len(bundle.NodeRuns), TerminalNodes: terminal, FailedNodes: failed, UpdatedAt: bundle.Run.UpdatedAt}); err != nil {
 			return err
 		}
+		if err := tx.CreateWorkflowScheduleState(ctx, harnessmodel.WorkflowScheduleState{WorkflowRunID: bundle.Run.ID, Weight: 1, UpdatedAt: bundle.Run.UpdatedAt}); err != nil {
+			return err
+		}
 		for _, rev := range bundle.Revisions {
 			if err := tx.CreateGraphRevision(ctx, rev); err != nil {
 				return err
@@ -54,6 +58,11 @@ func Apply(ctx context.Context, target harnessstore.Store, bundle Bundle) (Apply
 		for _, nr := range bundle.NodeRuns {
 			if err := tx.CreateNodeRun(ctx, nr); err != nil {
 				return err
+			}
+			if nr.State == harnessmodel.NodeReady {
+				if err := tx.EnqueueReadyNode(ctx, nr.ID, nr.UpdatedAt, time.Time{}, "legacy"); err != nil {
+					return err
+				}
 			}
 		}
 		for _, event := range bundle.Events {
