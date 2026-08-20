@@ -90,7 +90,7 @@ func validateRetryPolicies(policies map[string]harnessmodel.RetryPolicySpec) err
 		if policy.MaxAttempts < 1 {
 			return fmt.Errorf("retry policy %q maxAttempts must be >= 1", name)
 		}
-		if policy.MaxElapsedTime < 0 || policy.InitialDelay < 0 || policy.MaxDelay < 0 {
+		if policy.MaxElapsedTime < 0 || policy.InitialDelay < 0 || policy.MaxDelay < 0 || policy.WorkflowBudgetWindow < 0 || policy.ServiceBudgetWindow < 0 {
 			return fmt.Errorf("retry policy %q contains negative durations", name)
 		}
 		if policy.BackoffFactor != 0 && policy.BackoffFactor < 1 {
@@ -99,10 +99,19 @@ func validateRetryPolicies(policies map[string]harnessmodel.RetryPolicySpec) err
 		if policy.Jitter < 0 || policy.Jitter > 1 {
 			return fmt.Errorf("retry policy %q jitter must be in [0,1]", name)
 		}
+		if (policy.WorkflowBudgetLimit == 0) != (policy.WorkflowBudgetWindow == 0) || policy.WorkflowBudgetLimit < 0 {
+			return fmt.Errorf("retry policy %q workflow budget limit/window must be configured together", name)
+		}
+		if (policy.ServiceBudgetLimit == 0) != (policy.ServiceBudgetWindow == 0) || policy.ServiceBudgetLimit < 0 {
+			return fmt.Errorf("retry policy %q service budget limit/window must be configured together", name)
+		}
 		seen := make(map[harnessmodel.ErrorClass]bool)
 		for _, class := range policy.RetryableClasses {
 			if !class.Valid() {
 				return fmt.Errorf("retry policy %q has invalid retryable class %q", name, class)
+			}
+			if class == harnessmodel.ErrorApplicationPermanent || class == harnessmodel.ErrorCancelled || class == harnessmodel.ErrorPolicyDenied || class == harnessmodel.ErrorUnschedulable || class == harnessmodel.ErrorUnknownEffect {
+				return fmt.Errorf("retry policy %q cannot automatically retry safety class %q", name, class)
 			}
 			if seen[class] {
 				return fmt.Errorf("retry policy %q repeats class %q", name, class)
