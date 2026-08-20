@@ -123,6 +123,7 @@ type NodeSpec struct {
 	Kind               NodeKind            `json:"kind"`
 	ExecutorKind       ExecutorKind        `json:"executorKind,omitempty"`
 	Dependencies       []NodeID            `json:"dependencies,omitempty"`
+	Priority           int                 `json:"priority,omitempty"`
 	RetryPolicyRef     string              `json:"retryPolicyRef,omitempty"`
 	TimeoutPolicyRef   string              `json:"timeoutPolicyRef,omitempty"`
 	Resources          ResourceSpec        `json:"resources,omitempty"`
@@ -143,4 +144,6 @@ type NodeRun struct {
 	UpdatedAt             time.Time     `json:"updatedAt"`
 	State                 NodeState     `json:"state"`
 	RemainingDependencies int           `json:"remainingDependencies"`
+	Priority              int           `json:"priority,omitempty"`
+	EffectivePriority     int           `json:"effectivePriority,omitempty"`
 }
