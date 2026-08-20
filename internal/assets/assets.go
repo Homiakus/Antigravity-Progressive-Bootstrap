@@ -14,6 +14,19 @@ var data embed.FS
 
 func SkillNames() []string {
 	return []string{
+		"agctl",
+		"agctl-doctor",
+		"agctldoctor",
+		"agctl-run",
+		"agctlrun",
+		"agctl-replan",
+		"agctlreplan",
+		"agctl-dashboard",
+		"agctldashboard",
+		"agctl-loop",
+		"agctlloop",
+		"agctl-tasks",
+		"agctltasks",
 		"adaptive-tool-router",
 		"autonomous-engineering",
 		"autonomous-completion-loop",

@@ -6,12 +6,18 @@
 *.dylib
 bin/
 dist/
+build/
+out/
 
-# Test binary
+# Test and benchmark artifacts
 *.test
+*.prof
 
-# Coverage tool output
+# Code coverage output
 *.out
+*.coverage
+coverage.html
+coverage.txt
 
 # Dependency directories
 vendor/
@@ -20,13 +26,28 @@ vendor/
 go.work
 go.work.sum
 
-# IDE and editor artifacts
+# Local runtime state and preferences
+tui_settings.json
+agctl_settings.json
+
+# IDE and editor files
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-.DS_Store
+*.sublime-project
+*.sublime-workspace
 
-# Temporary logs
+# Operating System files
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# Logs and temporary files
 *.log
+logs/
+tmp/
+.tmp/
+scratch/
