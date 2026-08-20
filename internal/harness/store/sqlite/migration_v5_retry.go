@@ -34,6 +34,7 @@ CREATE TABLE retry_budgets (
     scope TEXT NOT NULL,
     scope_key TEXT NOT NULL,
     window_start TEXT NOT NULL,
+    window_start_ns INTEGER NOT NULL,
     window_ns INTEGER NOT NULL CHECK(window_ns > 0),
     limit_count INTEGER NOT NULL CHECK(limit_count > 0),
     used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
@@ -43,7 +44,7 @@ CREATE TABLE retry_budgets (
 );
 
 CREATE INDEX retry_budgets_window
-    ON retry_budgets(scope, window_start, updated_at);
+    ON retry_budgets(scope, window_start_ns, updated_at);
 
 CREATE TABLE circuit_breakers (
     service_key TEXT PRIMARY KEY,
