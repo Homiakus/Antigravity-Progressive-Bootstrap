@@ -96,11 +96,11 @@ func scanRetrySchedule(row interface{ Scan(...any) error }) (harnessmodel.RetryS
 func (t *transaction) GetRetryBudget(ctx context.Context, scope harnessmodel.RetryBudgetScope, scopeKey string) (harnessmodel.RetryBudget, error) {
 	var budget harnessmodel.RetryBudget
 	var scopeValue, windowStart, updatedAt string
-	var windowNS int64
+	var windowStartNS, windowNS int64
 	if err := t.tx.QueryRowContext(ctx, `
-SELECT scope, scope_key, window_start, window_ns, limit_count, used_count, updated_at
+SELECT scope, scope_key, window_start, window_start_ns, window_ns, limit_count, used_count, updated_at
 FROM retry_budgets WHERE scope=? AND scope_key=?`, string(scope), scopeKey).
-		Scan(&scopeValue, &budget.ScopeKey, &windowStart, &windowNS, &budget.Limit, &budget.Used, &updatedAt); err != nil {
+		Scan(&scopeValue, &budget.ScopeKey, &windowStart, &windowStartNS, &windowNS, &budget.Limit, &budget.Used, &updatedAt); err != nil {
 		return harnessmodel.RetryBudget{}, mapNotFound(err)
 	}
 	budget.Scope = harnessmodel.RetryBudgetScope(scopeValue)
@@ -109,60 +109,86 @@ FROM retry_budgets WHERE scope=? AND scope_key=?`, string(scope), scopeKey).
 	if budget.WindowStart, err = parseTime(windowStart); err != nil {
 		return harnessmodel.RetryBudget{}, fmt.Errorf("parse retry budget window_start: %w", err)
 	}
+	if budget.WindowStart.UnixNano() != windowStartNS {
+		return harnessmodel.RetryBudget{}, fmt.Errorf("retry budget %s/%s has inconsistent window timestamp", scope, scopeKey)
+	}
 	if budget.UpdatedAt, err = parseTime(updatedAt); err != nil {
 		return harnessmodel.RetryBudget{}, fmt.Errorf("parse retry budget updated_at: %w", err)
 	}
 	return budget, nil
 }
 
+// ReserveRetryBudget is a single-statement reservation. The UPSERT performs
+// increment or window reset inside SQLite, so concurrent callers cannot lose a
+// token through read-modify-write races. A no-row RETURNING result means either
+// exhaustion or a policy-shape conflict and is classified by a read in the same
+// transaction.
 func (t *transaction) ReserveRetryBudget(ctx context.Context, scope harnessmodel.RetryBudgetScope, scopeKey string, window time.Duration, limit int, now time.Time) (harnessmodel.RetryBudget, bool, error) {
 	if (scope != harnessmodel.RetryBudgetWorkflow && scope != harnessmodel.RetryBudgetService) || scopeKey == "" || window <= 0 || limit < 1 || now.IsZero() {
 		return harnessmodel.RetryBudget{}, false, fmt.Errorf("invalid retry budget reservation")
 	}
-	current, err := t.GetRetryBudget(ctx, scope, scopeKey)
-	if err == harnessstore.ErrNotFound {
-		budget := harnessmodel.RetryBudget{Scope: scope, ScopeKey: scopeKey, WindowStart: now.UTC(), Window: window, Limit: limit, Used: 1, UpdatedAt: now.UTC()}
-		_, err := t.tx.ExecContext(ctx, `
-INSERT INTO retry_budgets(scope, scope_key, window_start, window_ns, limit_count, used_count, updated_at)
-VALUES(?, ?, ?, ?, ?, 1, ?)`, string(scope), scopeKey, formatTime(budget.WindowStart), int64(window), limit, formatTime(budget.UpdatedAt))
-		if err != nil {
-			return harnessmodel.RetryBudget{}, false, fmt.Errorf("insert retry budget: %w", err)
+	now = now.UTC()
+	nowNS := now.UnixNano()
+	windowNS := int64(window)
+	var budget harnessmodel.RetryBudget
+	var scopeValue, windowStart, updatedAt string
+	var storedWindowStartNS, storedWindowNS int64
+	err := t.tx.QueryRowContext(ctx, `
+INSERT INTO retry_budgets(
+    scope, scope_key, window_start, window_start_ns, window_ns,
+    limit_count, used_count, updated_at
+)
+VALUES(?, ?, ?, ?, ?, ?, 1, ?)
+ON CONFLICT(scope, scope_key) DO UPDATE SET
+    window_start = CASE
+        WHEN excluded.window_start_ns >= retry_budgets.window_start_ns + retry_budgets.window_ns
+        THEN excluded.window_start ELSE retry_budgets.window_start END,
+    window_start_ns = CASE
+        WHEN excluded.window_start_ns >= retry_budgets.window_start_ns + retry_budgets.window_ns
+        THEN excluded.window_start_ns ELSE retry_budgets.window_start_ns END,
+    used_count = CASE
+        WHEN excluded.window_start_ns >= retry_budgets.window_start_ns + retry_budgets.window_ns
+        THEN 1 ELSE retry_budgets.used_count + 1 END,
+    updated_at = excluded.updated_at
+WHERE retry_budgets.window_ns = excluded.window_ns
+  AND retry_budgets.limit_count = excluded.limit_count
+  AND (
+      excluded.window_start_ns >= retry_budgets.window_start_ns + retry_budgets.window_ns
+      OR retry_budgets.used_count < retry_budgets.limit_count
+  )
+RETURNING scope, scope_key, window_start, window_start_ns, window_ns, limit_count, used_count, updated_at`,
+		string(scope), scopeKey, formatTime(now), nowNS, windowNS, limit, formatTime(now)).
+		Scan(&scopeValue, &budget.ScopeKey, &windowStart, &storedWindowStartNS, &storedWindowNS, &budget.Limit, &budget.Used, &updatedAt)
+	if err == nil {
+		budget.Scope = harnessmodel.RetryBudgetScope(scopeValue)
+		budget.Window = time.Duration(storedWindowNS)
+		var parseErr error
+		if budget.WindowStart, parseErr = parseTime(windowStart); parseErr != nil {
+			return harnessmodel.RetryBudget{}, false, fmt.Errorf("parse reserved retry budget window_start: %w", parseErr)
+		}
+		if budget.WindowStart.UnixNano() != storedWindowStartNS {
+			return harnessmodel.RetryBudget{}, false, fmt.Errorf("reserved retry budget has inconsistent window timestamp")
+		}
+		if budget.UpdatedAt, parseErr = parseTime(updatedAt); parseErr != nil {
+			return harnessmodel.RetryBudget{}, false, fmt.Errorf("parse reserved retry budget updated_at: %w", parseErr)
 		}
 		return budget, true, nil
 	}
-	if err != nil {
-		return harnessmodel.RetryBudget{}, false, err
+	if err != sql.ErrNoRows {
+		return harnessmodel.RetryBudget{}, false, fmt.Errorf("reserve retry budget: %w", err)
+	}
+
+	current, readErr := t.GetRetryBudget(ctx, scope, scopeKey)
+	if readErr != nil {
+		return harnessmodel.RetryBudget{}, false, readErr
 	}
 	if current.Window != window || current.Limit != limit {
 		return current, false, fmt.Errorf("retry budget %s/%s policy changed inside active window: %w", scope, scopeKey, harnessstore.ErrConflict)
 	}
-	if !now.Before(current.WindowStart.Add(current.Window)) {
-		current.WindowStart = now.UTC()
-		current.Used = 1
-		current.UpdatedAt = now.UTC()
-		_, err := t.tx.ExecContext(ctx, `
-UPDATE retry_budgets SET window_start=?, used_count=1, updated_at=? WHERE scope=? AND scope_key=?`,
-			formatTime(current.WindowStart), formatTime(current.UpdatedAt), string(scope), scopeKey)
-		if err != nil {
-			return harnessmodel.RetryBudget{}, false, fmt.Errorf("reset retry budget: %w", err)
-		}
-		return current, true, nil
-	}
-	if current.Used >= current.Limit {
+	if now.Before(current.WindowStart.Add(current.Window)) && current.Used >= current.Limit {
 		return current, false, nil
 	}
-	current.Used++
-	current.UpdatedAt = now.UTC()
-	res, err := t.tx.ExecContext(ctx, `
-UPDATE retry_budgets SET used_count=?, updated_at=?
-WHERE scope=? AND scope_key=? AND used_count<?`, current.Used, formatTime(current.UpdatedAt), string(scope), scopeKey, current.Limit)
-	if err != nil {
-		return harnessmodel.RetryBudget{}, false, fmt.Errorf("reserve retry budget: %w", err)
-	}
-	if err := requireOneAffected(res); err != nil {
-		return harnessmodel.RetryBudget{}, false, harnessstore.ErrConflict
-	}
-	return current, true, nil
+	return current, false, harnessstore.ErrConflict
 }
 
 func (t *transaction) GetCircuitBreaker(ctx context.Context, serviceKey string) (harnessmodel.CircuitBreaker, error) {
