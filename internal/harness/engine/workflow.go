@@ -8,14 +8,15 @@ import (
 	"fmt"
 	"time"
 
+	harnesscompiler "github.com/homiakus/agctl/internal/harness/compiler"
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	harnessstate "github.com/homiakus/agctl/internal/harness/state"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
 func (e *Engine) StartWorkflow(ctx context.Context, def harnessmodel.WorkflowDefinition) (harnessmodel.WorkflowRun, error) {
-	if def.ID == "" || def.Version < 1 || len(def.Nodes) == 0 {
-		return harnessmodel.WorkflowRun{}, fmt.Errorf("compiled workflow definition with id, version and at least one node is required")
+	if err := harnesscompiler.ValidateCompiled(def); err != nil {
+		return harnessmodel.WorkflowRun{}, fmt.Errorf("validate workflow definition: %w", err)
 	}
 	now := e.now().UTC()
 	rawRunID, err := e.nextID(harnessmodel.IDWorkflowRun)
