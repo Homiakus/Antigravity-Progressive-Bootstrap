@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 type migration struct {
 	Version int
@@ -168,6 +168,22 @@ CREATE TABLE outbox (
 
 CREATE INDEX outbox_pending
     ON outbox(delivered_at, next_attempt_at, outbox_id);
+`,
+	},
+	{
+		Version: 2,
+		Name:    "workflow_progress_counters",
+		SQL: `
+CREATE TABLE workflow_progress (
+    workflow_run_id TEXT PRIMARY KEY,
+    total_nodes INTEGER NOT NULL DEFAULT 0 CHECK(total_nodes >= 0),
+    terminal_nodes INTEGER NOT NULL DEFAULT 0 CHECK(terminal_nodes >= 0),
+    failed_nodes INTEGER NOT NULL DEFAULT 0 CHECK(failed_nodes >= 0),
+    updated_at TEXT NOT NULL,
+    CHECK(terminal_nodes <= total_nodes),
+    CHECK(failed_nodes <= terminal_nodes),
+    FOREIGN KEY(workflow_run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+);
 `,
 	},
 }
