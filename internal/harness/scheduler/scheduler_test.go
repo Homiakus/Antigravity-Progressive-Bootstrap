@@ -10,7 +10,6 @@ import (
 	"github.com/homiakus/agctl/internal/harness/engine"
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	"github.com/homiakus/agctl/internal/harness/resource"
-	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 	sqlitestore "github.com/homiakus/agctl/internal/harness/store/sqlite"
 )
 
@@ -57,15 +56,13 @@ func finishDecision(t *testing.T, ctx context.Context, eng *engine.Engine, decis
 func TestFairnessSmallWorkflowGetsBoundedService(t *testing.T) {
 	ctx := context.Background()
 	eng, sched, _ := schedulerFixture(t)
-	large, err := eng.StartWorkflow(ctx, independentDefinition("large", 100))
-	if err != nil {
+	if _, err := eng.StartWorkflow(ctx, independentDefinition("large", 100)); err != nil {
 		t.Fatal(err)
 	}
 	small, err := eng.StartWorkflow(ctx, independentDefinition("small", 3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = large
 
 	seenSmallAt := -1
 	for i := 0; i < 4; i++ {
@@ -88,7 +85,7 @@ func TestFairnessSmallWorkflowGetsBoundedService(t *testing.T) {
 
 func TestHardResourceConstraintNeverFallsBackToInfeasibleNode(t *testing.T) {
 	ctx := context.Background()
-	eng, sched, _ := schedulerFixture(t)
+	eng, sched, db := schedulerFixture(t)
 	def := harnessmodel.WorkflowDefinition{
 		ID: "resource-hard", Version: 1, Name: "resource-hard", CompilerVersion: "scheduler-test", CreatedAt: time.Unix(1000, 0).UTC(),
 		Nodes: []harnessmodel.NodeSpec{
@@ -111,27 +108,11 @@ func TestHardResourceConstraintNeverFallsBackToInfeasibleNode(t *testing.T) {
 		t.Fatalf("scheduler selected %s, must not select infeasible gpu node", decision.Node.NodeID)
 	}
 
-	var gpuID harnessmodel.NodeRunID
-	if err := sched.store.View(ctx, func(reader harnessstore.Reader) error {
-		var rowsErr error
-		rows, queryErr := sched.(*Scheduler)
-		_ = rows
-		_ = queryErr
-		return rowsErr
-	}); err != nil {
-		_ = run
-	}
-	if err := sched.store.View(ctx, func(reader harnessstore.Reader) error {
-		var id string
-		if err := sched.store.(*sqlitestore.DB).SQLDB().QueryRowContext(ctx, `SELECT id FROM node_runs WHERE workflow_run_id=? AND node_id='gpu'`, string(run.ID)).Scan(&id); err != nil {
-			return err
-		}
-		gpuID = harnessmodel.NodeRunID(id)
-		return nil
-	}); err != nil {
+	var gpuID string
+	if err := db.SQLDB().QueryRowContext(ctx, `SELECT id FROM node_runs WHERE workflow_run_id=? AND node_id='gpu'`, string(run.ID)).Scan(&gpuID); err != nil {
 		t.Fatal(err)
 	}
-	explanation, err := sched.ExplainNode(ctx, gpuID)
+	explanation, err := sched.ExplainNode(ctx, harnessmodel.NodeRunID(gpuID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +123,7 @@ func TestHardResourceConstraintNeverFallsBackToInfeasibleNode(t *testing.T) {
 
 func TestPriorityInheritanceRaisesBlockingAncestor(t *testing.T) {
 	ctx := context.Background()
-	eng, sched, _ := schedulerFixture(t)
+	eng, sched, db := schedulerFixture(t)
 	def := harnessmodel.WorkflowDefinition{
 		ID: "priority-inheritance", Version: 1, Name: "priority-inheritance", CompilerVersion: "scheduler-test", CreatedAt: time.Unix(1000, 0).UTC(),
 		Nodes: []harnessmodel.NodeSpec{
@@ -163,7 +144,7 @@ func TestPriorityInheritanceRaisesBlockingAncestor(t *testing.T) {
 	}
 
 	var urgentID string
-	if err := sched.store.(*sqlitestore.DB).SQLDB().QueryRowContext(ctx, `SELECT id FROM node_runs WHERE workflow_run_id=? AND node_id='urgent'`, string(run.ID)).Scan(&urgentID); err != nil {
+	if err := db.SQLDB().QueryRowContext(ctx, `SELECT id FROM node_runs WHERE workflow_run_id=? AND node_id='urgent'`, string(run.ID)).Scan(&urgentID); err != nil {
 		t.Fatal(err)
 	}
 	explanation, err := sched.ExplainNode(ctx, harnessmodel.NodeRunID(urgentID))
