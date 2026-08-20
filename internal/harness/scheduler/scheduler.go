@@ -11,18 +11,20 @@ import (
 )
 
 type Options struct {
-	Capacity       resource.Capacity
-	LaneLimit      int
-	CandidateLimit int
-	Now            func() time.Time
+	Capacity              resource.Capacity
+	LaneLimit             int
+	CandidateLimit        int
+	ClassificationBatches int
+	Now                   func() time.Time
 }
 
 type Scheduler struct {
-	store          harnessstore.Store
-	capacity       resource.Capacity
-	laneLimit      int
-	candidateLimit int
-	now            func() time.Time
+	store                 harnessstore.Store
+	capacity              resource.Capacity
+	laneLimit             int
+	candidateLimit        int
+	classificationBatches int
+	now                   func() time.Time
 }
 
 type Decision struct {
@@ -41,11 +43,18 @@ func New(store harnessstore.Store, opts Options) (*Scheduler, error) {
 	if candidateLimit <= 0 {
 		candidateLimit = 64
 	}
+	classificationBatches := opts.ClassificationBatches
+	if classificationBatches <= 0 {
+		classificationBatches = 16
+	}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &Scheduler{store: store, capacity: opts.Capacity, laneLimit: laneLimit, candidateLimit: candidateLimit, now: now}, nil
+	return &Scheduler{
+		store: store, capacity: opts.Capacity, laneLimit: laneLimit,
+		candidateLimit: candidateLimit, classificationBatches: classificationBatches, now: now,
+	}, nil
 }
 
 func (s *Scheduler) SetWorkflowWeight(ctx context.Context, runID harnessmodel.WorkflowRunID, weight int) error {
@@ -63,9 +72,10 @@ func (s *Scheduler) SetWorkflowWeight(ctx context.Context, runID harnessmodel.Wo
 
 // Next returns one feasible READY node. Selection is two-level: first choose a
 // workflow lane by normalized durable service (service_count/weight), then the
-// highest effective priority node inside that lane. The decision is not an
-// execution claim; Stage 5 adds leases/fencing. Resource constraints are hard:
-// an infeasible node is annotated RESOURCE and never selected as a fallback.
+// highest effective priority feasible node inside that lane. Resource
+// classification is performed in bounded batches so a prefix of infeasible
+// high-priority nodes cannot permanently hide feasible work below it. The
+// decision is not an execution claim; Stage 5 adds leases/fencing.
 func (s *Scheduler) Next(ctx context.Context) (Decision, bool, error) {
 	now := s.now().UTC()
 	var decision Decision
@@ -76,31 +86,47 @@ func (s *Scheduler) Next(ctx context.Context) (Decision, bool, error) {
 			return err
 		}
 		for _, lane := range lanes {
-			nodes, err := tx.ListReadyNodes(ctx, lane.WorkflowRunID, now, s.candidateLimit)
-			if err != nil {
-				return err
-			}
-			for _, node := range nodes {
-				fits, failures := resource.Fits(s.capacity, node.Resources)
-				if !fits {
-					if err := tx.SetReadyWait(ctx, node.NodeRunID, harnessmodel.WaitResource, resource.ExplainFailures(failures), now); err != nil {
-						return err
-					}
-					continue
-				}
-				if node.WaitReason != harnessmodel.WaitNone || node.WaitDetail != "" {
-					if err := tx.SetReadyWait(ctx, node.NodeRunID, harnessmodel.WaitNone, "", now); err != nil {
-						return err
-					}
-					node.WaitReason = harnessmodel.WaitNone
-					node.WaitDetail = ""
-				}
-				if err := tx.RecordWorkflowService(ctx, lane.WorkflowRunID, now); err != nil {
+			for batch := 0; batch < s.classificationBatches; batch++ {
+				nodes, err := tx.ListReadyNodes(ctx, lane.WorkflowRunID, now, s.candidateLimit)
+				if err != nil {
 					return err
 				}
-				decision = Decision{Node: node}
-				found = true
-				return nil
+				if len(nodes) == 0 {
+					break
+				}
+				classifiedFresh := false
+				for _, node := range nodes {
+					fits, failures := resource.Fits(s.capacity, node.Resources)
+					if !fits {
+						detail := resource.ExplainFailures(failures)
+						if node.WaitReason != harnessmodel.WaitResource || node.WaitDetail != detail {
+							if err := tx.SetReadyWait(ctx, node.NodeRunID, harnessmodel.WaitResource, detail, now); err != nil {
+								return err
+							}
+							classifiedFresh = true
+						}
+						continue
+					}
+					if node.WaitReason != harnessmodel.WaitNone || node.WaitDetail != "" {
+						if err := tx.SetReadyWait(ctx, node.NodeRunID, harnessmodel.WaitNone, "", now); err != nil {
+							return err
+						}
+						node.WaitReason = harnessmodel.WaitNone
+						node.WaitDetail = ""
+					}
+					if err := tx.RecordWorkflowService(ctx, lane.WorkflowRunID, now); err != nil {
+						return err
+					}
+					decision = Decision{Node: node}
+					found = true
+					return nil
+				}
+				// Because unclassified rows sort before rows with wait_reason, if a
+				// full batch contains only already-classified blocked nodes there is
+				// no hidden unclassified candidate behind this batch.
+				if !classifiedFresh {
+					break
+				}
 			}
 		}
 		return nil
