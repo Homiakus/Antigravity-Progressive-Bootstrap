@@ -25,12 +25,19 @@ func seedRetryFixture(t *testing.T, db *DB, now time.Time) harnessmodel.RetrySch
 		if err := tx.CreateNodeRun(context.Background(), node); err != nil {
 			return err
 		}
-		attempt, err := tx.CreateNextAttempt(context.Background(), harnessmodel.Attempt{ID: "att_retry_1", NodeRunID: node.ID, State: harnessmodel.AttemptFailed, CreatedAt: now.Add(-time.Second), StartedAt: now.Add(-time.Second), FinishedAt: now, ErrorClass: string(harnessmodel.ErrorInfraTransient)})
+		attempt, err := tx.CreateNextAttempt(context.Background(), harnessmodel.Attempt{ID: "att_retry_1", NodeRunID: node.ID, State: harnessmodel.AttemptCreated, CreatedAt: now.Add(-time.Second)})
 		if err != nil {
 			return err
 		}
 		if attempt.Number != 1 {
 			t.Fatalf("seed attempt number=%d want=1", attempt.Number)
+		}
+		attempt.State = harnessmodel.AttemptFailed
+		attempt.StartedAt = now.Add(-time.Second)
+		attempt.FinishedAt = now
+		attempt.ErrorClass = string(harnessmodel.ErrorInfraTransient)
+		if err := tx.CompareAndSwapAttempt(context.Background(), harnessmodel.AttemptCreated, attempt); err != nil {
+			return err
 		}
 		return nil
 	})
