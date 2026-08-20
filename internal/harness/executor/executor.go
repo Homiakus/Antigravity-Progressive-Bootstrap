@@ -52,6 +52,10 @@ type LogChunk struct {
 	Data   []byte    `json:"data"`
 }
 
+// LogSink receives bounded-stream chunks. Implementations must apply their own
+// persistence/backpressure policy and MUST return promptly after ctx is
+// cancelled. The process runtime cancels this context during termination so a
+// log consumer cannot prevent the child process tree from being drained.
 type LogSink interface {
 	WriteChunk(context.Context, LogChunk) error
 }
