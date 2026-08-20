@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,9 +27,10 @@ var (
 )
 
 type Executor struct {
-	mu      sync.RWMutex
-	running map[harnessexecutor.ExecutionID]*runningProcess
-	now     func() time.Time
+	mu       sync.RWMutex
+	starting map[harnessexecutor.ExecutionID]time.Time
+	running  map[harnessexecutor.ExecutionID]*runningProcess
+	now      func() time.Time
 }
 
 type runningProcess struct {
@@ -50,7 +52,11 @@ func New(opts Options) *Executor {
 	if now == nil {
 		now = time.Now
 	}
-	return &Executor{running: make(map[harnessexecutor.ExecutionID]*runningProcess), now: now}
+	return &Executor{
+		starting: make(map[harnessexecutor.ExecutionID]time.Time),
+		running:  make(map[harnessexecutor.ExecutionID]*runningProcess),
+		now:      now,
+	}
 }
 
 func (e *Executor) Capabilities() harnessexecutor.Capabilities {
@@ -103,6 +109,18 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 	if sink == nil {
 		sink = harnessexecutor.NopSink{}
 	}
+
+	// Reserve the logical execution identity before Cmd.Start. A duplicate ID
+	// must fail before any external process side effect is created.
+	if err := e.reserve(req.ID); err != nil {
+		return harnessexecutor.Result{}, err
+	}
+	reserved := true
+	defer func() {
+		if reserved {
+			e.releaseReservation(req.ID)
+		}
+	}()
 
 	result := harnessexecutor.Result{ExecutionID: req.ID, ExitCode: -1}
 	stdoutTail := newRingTail(req.OutputTailBytes)
@@ -168,7 +186,7 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 	result.StartedAt = startedAt
 
 	rp := &runningProcess{id: req.ID, cmd: cmd, tree: tree, startedAt: startedAt, grace: req.GracePeriod, done: make(chan struct{})}
-	if err := e.register(rp); err != nil {
+	if err := e.activate(rp); err != nil {
 		_ = tree.HardKill()
 		_ = cmd.Wait()
 		_ = tree.Close()
@@ -177,6 +195,7 @@ func (e *Executor) Execute(ctx context.Context, prepared harnessexecutor.Prepare
 		sinkWG.Wait()
 		return harnessexecutor.Result{}, err
 	}
+	reserved = false
 	defer e.unregister(req.ID)
 
 	waitCh := make(chan error, 1)
@@ -231,7 +250,7 @@ waitLoop:
 
 	// Cmd.Wait returns only after os/exec has finished copying both configured
 	// writers. No child output can be sent after this point, so the bounded
-	// stream channel can now be closed without racing a pipe reader.
+	// stream channel can now be closed without racing a writer.
 	close(chunks)
 	sinkWG.Wait()
 	streamCancel()
@@ -281,19 +300,44 @@ func (e *Executor) Cancel(ctx context.Context, id harnessexecutor.ExecutionID, m
 }
 
 func (e *Executor) Reconcile(_ context.Context, id harnessexecutor.ExecutionID) (harnessexecutor.RuntimeStatus, error) {
-	rp, ok := e.lookup(id)
-	if !ok {
-		return harnessexecutor.RuntimeStatus{ExecutionID: id, State: harnessexecutor.RuntimeUnknown}, nil
+	if rp, ok := e.lookup(id); ok {
+		return harnessexecutor.RuntimeStatus{ExecutionID: id, State: harnessexecutor.RuntimeRunning, PID: rp.cmd.Process.Pid, StartedAt: rp.startedAt}, nil
 	}
-	return harnessexecutor.RuntimeStatus{ExecutionID: id, State: harnessexecutor.RuntimeRunning, PID: rp.cmd.Process.Pid, StartedAt: rp.startedAt}, nil
+	if startedAt, ok := e.lookupStarting(id); ok {
+		return harnessexecutor.RuntimeStatus{ExecutionID: id, State: harnessexecutor.RuntimeStarting, StartedAt: startedAt}, nil
+	}
+	return harnessexecutor.RuntimeStatus{ExecutionID: id, State: harnessexecutor.RuntimeUnknown}, nil
 }
 
-func (e *Executor) register(rp *runningProcess) error {
+func (e *Executor) reserve(id harnessexecutor.ExecutionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, exists := e.starting[id]; exists {
+		return ErrAlreadyRunning
+	}
+	if _, exists := e.running[id]; exists {
+		return ErrAlreadyRunning
+	}
+	e.starting[id] = e.now().UTC()
+	return nil
+}
+
+func (e *Executor) releaseReservation(id harnessexecutor.ExecutionID) {
+	e.mu.Lock()
+	delete(e.starting, id)
+	e.mu.Unlock()
+}
+
+func (e *Executor) activate(rp *runningProcess) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if _, exists := e.running[rp.id]; exists {
 		return ErrAlreadyRunning
 	}
+	if _, reserved := e.starting[rp.id]; !reserved {
+		return fmt.Errorf("process executor: execution %s lost its start reservation", rp.id)
+	}
+	delete(e.starting, rp.id)
 	e.running[rp.id] = rp
 	return nil
 }
@@ -309,6 +353,13 @@ func (e *Executor) lookup(id harnessexecutor.ExecutionID) (*runningProcess, bool
 	rp, ok := e.running[id]
 	e.mu.RUnlock()
 	return rp, ok
+}
+
+func (e *Executor) lookupStarting(id harnessexecutor.ExecutionID) (time.Time, bool) {
+	e.mu.RLock()
+	startedAt, ok := e.starting[id]
+	e.mu.RUnlock()
+	return startedAt, ok
 }
 
 func terminateWithEscalation(ctx context.Context, rp *runningProcess, mode harnessexecutor.CancelMode) error {
@@ -344,19 +395,42 @@ func terminateWithEscalation(ctx context.Context, rp *runningProcess, mode harne
 }
 
 func mergedEnv(overrides map[string]string) []string {
-	env := append([]string(nil), os.Environ()...)
-	if len(overrides) == 0 {
-		return env
+	// Produce one value per key instead of appending duplicate KEY=value pairs.
+	// Duplicate environment names have platform-dependent semantics, especially
+	// on Windows, and should not be part of executor behavior.
+	values := make(map[string]string)
+	spelling := make(map[string]string)
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		normalized := envKey(key)
+		values[normalized] = value
+		spelling[normalized] = key
 	}
-	keys := make([]string, 0, len(overrides))
-	for key := range overrides {
+	for key, value := range overrides {
+		normalized := envKey(key)
+		values[normalized] = value
+		spelling[normalized] = key
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	for _, key := range keys {
-		env = append(env, key+"="+overrides[key])
+	env := make([]string, 0, len(keys))
+	for _, normalized := range keys {
+		env = append(env, spelling[normalized]+"="+values[normalized])
 	}
 	return env
+}
+
+func envKey(key string) string {
+	if os.PathSeparator == '\\' {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func exitCode(err error) int {
