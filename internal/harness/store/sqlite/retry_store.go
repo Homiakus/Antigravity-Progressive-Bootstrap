@@ -171,9 +171,9 @@ func (t *transaction) GetCircuitBreaker(ctx context.Context, serviceKey string) 
 	var openedAt, nextProbeAt sql.NullString
 	var probe int
 	if err := t.tx.QueryRowContext(ctx, `
-SELECT service_key, state, consecutive_failures, failure_threshold, opened_at, next_probe_at, probe_in_flight, updated_at
+SELECT service_key, revision, state, consecutive_failures, failure_threshold, opened_at, next_probe_at, probe_in_flight, updated_at
 FROM circuit_breakers WHERE service_key=?`, serviceKey).
-		Scan(&breaker.ServiceKey, &state, &breaker.ConsecutiveFailures, &breaker.FailureThreshold, &openedAt, &nextProbeAt, &probe, &updatedAt); err != nil {
+		Scan(&breaker.ServiceKey, &breaker.Revision, &state, &breaker.ConsecutiveFailures, &breaker.FailureThreshold, &openedAt, &nextProbeAt, &probe, &updatedAt); err != nil {
 		return harnessmodel.CircuitBreaker{}, mapNotFound(err)
 	}
 	breaker.State = harnessmodel.CircuitState(state)
@@ -195,39 +195,39 @@ FROM circuit_breakers WHERE service_key=?`, serviceKey).
 	return breaker, nil
 }
 
-func (t *transaction) UpsertCircuitBreaker(ctx context.Context, breaker harnessmodel.CircuitBreaker) error {
+func (t *transaction) CreateCircuitBreaker(ctx context.Context, breaker harnessmodel.CircuitBreaker) error {
 	if err := validateCircuit(breaker); err != nil {
 		return err
 	}
-	_, err := t.tx.ExecContext(ctx, `
-INSERT INTO circuit_breakers(service_key, state, consecutive_failures, failure_threshold, opened_at, next_probe_at, probe_in_flight, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(service_key) DO UPDATE SET
-    state=excluded.state,
-    consecutive_failures=excluded.consecutive_failures,
-    failure_threshold=excluded.failure_threshold,
-    opened_at=excluded.opened_at,
-    next_probe_at=excluded.next_probe_at,
-    probe_in_flight=excluded.probe_in_flight,
-    updated_at=excluded.updated_at`,
-		breaker.ServiceKey, string(breaker.State), breaker.ConsecutiveFailures, breaker.FailureThreshold,
+	res, err := t.tx.ExecContext(ctx, `
+INSERT INTO circuit_breakers(service_key, revision, state, consecutive_failures, failure_threshold, opened_at, next_probe_at, probe_in_flight, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(service_key) DO NOTHING`,
+		breaker.ServiceKey, breaker.Revision, string(breaker.State), breaker.ConsecutiveFailures, breaker.FailureThreshold,
 		nullTime(breaker.OpenedAt), nullTime(breaker.NextProbeAt), boolInt(breaker.ProbeInFlight), formatTime(breaker.UpdatedAt))
 	if err != nil {
-		return fmt.Errorf("upsert circuit breaker: %w", err)
+		return fmt.Errorf("create circuit breaker: %w", err)
+	}
+	if err := requireOneAffected(res); err != nil {
+		return harnessstore.ErrConflict
 	}
 	return nil
 }
 
-func (t *transaction) CompareAndSwapCircuitBreaker(ctx context.Context, expectedState harnessmodel.CircuitState, expectedProbe bool, breaker harnessmodel.CircuitBreaker) error {
+func (t *transaction) CompareAndSwapCircuitBreaker(ctx context.Context, expectedRevision uint64, breaker harnessmodel.CircuitBreaker) error {
+	if expectedRevision == 0 || breaker.Revision != expectedRevision+1 {
+		return fmt.Errorf("invalid circuit breaker revision transition %d -> %d", expectedRevision, breaker.Revision)
+	}
 	if err := validateCircuit(breaker); err != nil {
 		return err
 	}
 	res, err := t.tx.ExecContext(ctx, `
 UPDATE circuit_breakers
-SET state=?, consecutive_failures=?, failure_threshold=?, opened_at=?, next_probe_at=?, probe_in_flight=?, updated_at=?
-WHERE service_key=? AND state=? AND probe_in_flight=?`,
-		string(breaker.State), breaker.ConsecutiveFailures, breaker.FailureThreshold, nullTime(breaker.OpenedAt), nullTime(breaker.NextProbeAt), boolInt(breaker.ProbeInFlight), formatTime(breaker.UpdatedAt),
-		breaker.ServiceKey, string(expectedState), boolInt(expectedProbe))
+SET revision=?, state=?, consecutive_failures=?, failure_threshold=?, opened_at=?, next_probe_at=?, probe_in_flight=?, updated_at=?
+WHERE service_key=? AND revision=?`,
+		breaker.Revision, string(breaker.State), breaker.ConsecutiveFailures, breaker.FailureThreshold,
+		nullTime(breaker.OpenedAt), nullTime(breaker.NextProbeAt), boolInt(breaker.ProbeInFlight), formatTime(breaker.UpdatedAt),
+		breaker.ServiceKey, expectedRevision)
 	if err != nil {
 		return fmt.Errorf("compare-and-swap circuit breaker: %w", err)
 	}
@@ -238,7 +238,7 @@ WHERE service_key=? AND state=? AND probe_in_flight=?`,
 }
 
 func validateCircuit(breaker harnessmodel.CircuitBreaker) error {
-	if breaker.ServiceKey == "" || breaker.FailureThreshold < 1 || breaker.ConsecutiveFailures < 0 || breaker.UpdatedAt.IsZero() {
+	if breaker.ServiceKey == "" || breaker.Revision == 0 || breaker.FailureThreshold < 1 || breaker.ConsecutiveFailures < 0 || breaker.UpdatedAt.IsZero() {
 		return fmt.Errorf("invalid circuit breaker")
 	}
 	switch breaker.State {
