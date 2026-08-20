@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 type migration struct {
 	Version int
@@ -208,9 +208,13 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("SQLite migration %d checksum/name mismatch; released migrations are immutable", version)
 		}
 	}
-	for _, m := range migrations {
-		if _, ok := applied[m.Version]; ok {
+	for version := 1; version <= SchemaVersion; version++ {
+		if _, ok := applied[version]; ok {
 			continue
+		}
+		m, ok := migrationByVersion(version)
+		if !ok {
+			return fmt.Errorf("missing compiled SQLite migration version %d", version)
 		}
 		if err := applyMigration(ctx, db, m); err != nil {
 			return err
