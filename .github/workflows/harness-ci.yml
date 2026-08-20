@@ -39,6 +39,9 @@ jobs:
       - name: Stage 4 scheduler smoke benchmark
         run: go test ./internal/harness/scheduler -run '^$' -bench '^BenchmarkSchedulerNext10KReady$' -benchtime=1x -benchmem
 
+      - name: Stage 7 retry storm smoke benchmark
+        run: go test ./internal/harness/retry -run '^$' -bench '^BenchmarkRetryDecisionStorm100K$' -benchtime=1x -benchmem
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
