@@ -65,6 +65,7 @@ func Compile(def ir.Definition, opts Options) (harnessmodel.WorkflowDefinition, 
 		CompilerVersion: Version,
 		Nodes:           cloneNodes(normalized.Nodes),
 		EntryNodes:      append([]harnessmodel.NodeID(nil), normalized.EntryNodes...),
+		RetryPolicies:   cloneRetryPolicies(normalized.RetryPolicies),
 		Metadata:        cloneStringMap(normalized.Metadata),
 	}, nil
 }
