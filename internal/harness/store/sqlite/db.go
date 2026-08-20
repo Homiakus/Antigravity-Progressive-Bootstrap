@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -12,9 +13,15 @@ import (
 )
 
 type DB struct {
-	db   *sql.DB
-	path string
-	opts Options
+	// db is the authoritative writer/admin handle. SQLite has one physical
+	// writer at a time, so a single connection plus BEGIN IMMEDIATE converts
+	// in-process writer races into queueing instead of BUSY_SNAPSHOT upgrades.
+	db *sql.DB
+	// readDB keeps WAL reads concurrent and deliberately uses the driver's
+	// default deferred transaction mode rather than write intent.
+	readDB *sql.DB
+	path   string
+	opts   Options
 }
 
 func Open(ctx context.Context, path string, opts Options) (*DB, error) {
@@ -29,57 +36,103 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 		return nil, fmt.Errorf("create SQLite parent directory: %w", err)
 	}
 	opts = opts.normalized()
-	dsn := buildDSN(abs, opts)
-	raw, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("open SQLite: %w", err)
-	}
-	raw.SetMaxOpenConns(opts.MaxOpenConns)
-	raw.SetMaxIdleConns(opts.MaxIdleConns)
 
-	closeWith := func(openErr error) (*DB, error) {
-		_ = raw.Close()
+	writer, err := sql.Open("sqlite", buildWriterDSN(abs, opts))
+	if err != nil {
+		return nil, fmt.Errorf("open SQLite writer: %w", err)
+	}
+	// SQLite serializes writers internally. Keeping exactly one writer
+	// connection provides deterministic in-process backpressure while the WAL
+	// reader pool below remains independently concurrent.
+	writer.SetMaxOpenConns(1)
+	writer.SetMaxIdleConns(1)
+
+	closeWriter := func(openErr error) (*DB, error) {
+		_ = writer.Close()
 		return nil, openErr
 	}
-	if err := raw.PingContext(ctx); err != nil {
-		return closeWith(fmt.Errorf("ping SQLite: %w", err))
+	if err := writer.PingContext(ctx); err != nil {
+		return closeWriter(fmt.Errorf("ping SQLite writer: %w", err))
 	}
-	got, err := readPragmas(ctx, raw)
+	got, err := readPragmas(ctx, writer)
 	if err != nil {
-		return closeWith(err)
+		return closeWriter(err)
 	}
 	if err := verifyPragmas(got, opts); err != nil {
-		return closeWith(err)
+		return closeWriter(err)
 	}
-	if err := migrate(ctx, raw); err != nil {
-		return closeWith(fmt.Errorf("migrate SQLite: %w", err))
+	if err := migrate(ctx, writer); err != nil {
+		return closeWriter(fmt.Errorf("migrate SQLite: %w", err))
 	}
 	if SchemaVersion >= 5 {
-		if err := backfillReadyDeadlineNS(ctx, raw); err != nil {
-			return closeWith(fmt.Errorf("backfill SQLite deadlines: %w", err))
+		if err := backfillReadyDeadlineNS(ctx, writer); err != nil {
+			return closeWriter(fmt.Errorf("backfill SQLite deadlines: %w", err))
 		}
 	}
-	return &DB{db: raw, path: abs, opts: opts}, nil
+
+	reader, err := sql.Open("sqlite", buildDSN(abs, opts))
+	if err != nil {
+		return closeWriter(fmt.Errorf("open SQLite reader: %w", err))
+	}
+	reader.SetMaxOpenConns(opts.MaxOpenConns)
+	reader.SetMaxIdleConns(opts.MaxIdleConns)
+	closeBoth := func(openErr error) (*DB, error) {
+		_ = reader.Close()
+		_ = writer.Close()
+		return nil, openErr
+	}
+	if err := reader.PingContext(ctx); err != nil {
+		return closeBoth(fmt.Errorf("ping SQLite reader: %w", err))
+	}
+	readerPragmas, err := readPragmas(ctx, reader)
+	if err != nil {
+		return closeBoth(err)
+	}
+	if err := verifyPragmas(readerPragmas, opts); err != nil {
+		return closeBoth(fmt.Errorf("verify SQLite reader pragmas: %w", err))
+	}
+
+	return &DB{db: writer, readDB: reader, path: abs, opts: opts}, nil
 }
 
 func buildDSN(path string, opts Options) string {
+	return buildDSNWithTxLock(path, opts, "")
+}
+
+func buildWriterDSN(path string, opts Options) string {
+	return buildDSNWithTxLock(path, opts, "immediate")
+}
+
+func buildDSNWithTxLock(path string, opts Options, txLock string) string {
 	opts = opts.normalized()
 	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	q := url.Values{}
 	for _, pragma := range pragmaValues(opts) {
 		q.Add("_pragma", pragma)
 	}
+	if txLock != "" {
+		q.Set("_txlock", txLock)
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
 }
 
 func (d *DB) Close() error {
-	if d == nil || d.db == nil {
+	if d == nil {
 		return nil
 	}
-	return d.db.Close()
+	var writerErr, readerErr error
+	if d.db != nil {
+		writerErr = d.db.Close()
+	}
+	if d.readDB != nil {
+		readerErr = d.readDB.Close()
+	}
+	return errors.Join(writerErr, readerErr)
 }
 
+// SQLDB exposes the authoritative writer/admin handle for diagnostics,
+// migrations tests and backup primitives. Runtime read paths should use View.
 func (d *DB) SQLDB() *sql.DB {
 	if d == nil {
 		return nil
