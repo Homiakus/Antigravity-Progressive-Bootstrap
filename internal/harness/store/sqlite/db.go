@@ -54,6 +54,11 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 	if err := migrate(ctx, raw); err != nil {
 		return closeWith(fmt.Errorf("migrate SQLite: %w", err))
 	}
+	if SchemaVersion >= 5 {
+		if err := backfillReadyDeadlineNS(ctx, raw); err != nil {
+			return closeWith(fmt.Errorf("backfill SQLite deadlines: %w", err))
+		}
+	}
 	return &DB{db: raw, path: abs, opts: opts}, nil
 }
 
