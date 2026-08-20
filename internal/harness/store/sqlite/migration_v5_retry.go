@@ -47,6 +47,7 @@ CREATE INDEX retry_budgets_window
 
 CREATE TABLE circuit_breakers (
     service_key TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
     state TEXT NOT NULL,
     consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0),
     failure_threshold INTEGER NOT NULL CHECK(failure_threshold > 0),
