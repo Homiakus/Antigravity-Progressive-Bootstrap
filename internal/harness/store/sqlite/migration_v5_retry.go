@@ -11,6 +11,25 @@ CREATE INDEX ready_queue_due_ns
 CREATE INDEX ready_queue_global_due_ns
     ON ready_queue(not_before_ns, workflow_run_id, effective_priority DESC, priority DESC, ready_at);
 
+CREATE TABLE retry_schedule_history (
+    failed_attempt_id TEXT PRIMARY KEY,
+    node_run_id TEXT NOT NULL,
+    workflow_run_id TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL CHECK(attempt_number > 0),
+    failure_class TEXT NOT NULL,
+    policy_ref TEXT NOT NULL DEFAULT '',
+    service_key TEXT NOT NULL DEFAULT '',
+    scheduled_at TEXT NOT NULL,
+    not_before TEXT NOT NULL,
+    not_before_ns INTEGER NOT NULL,
+    FOREIGN KEY(node_run_id) REFERENCES node_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY(workflow_run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY(failed_attempt_id) REFERENCES attempts(id) ON DELETE CASCADE
+);
+
+CREATE INDEX retry_schedule_history_by_node
+    ON retry_schedule_history(node_run_id, attempt_number);
+
 CREATE TABLE retry_schedule (
     node_run_id TEXT PRIMARY KEY,
     workflow_run_id TEXT NOT NULL,
