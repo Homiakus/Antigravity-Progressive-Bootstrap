@@ -29,5 +29,6 @@ type Tx interface {
 	CreateWorkflowRun(context.Context, harnessmodel.WorkflowRun) error
 	UpdateWorkflowRunState(context.Context, harnessmodel.WorkflowRunID, harnessmodel.WorkflowState, time.Time) error
 	CreateGraphRevision(context.Context, harnessmodel.GraphRevision) error
+	CreateNodeRun(context.Context, harnessmodel.NodeRun) error
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
