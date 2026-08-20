@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
@@ -41,6 +42,10 @@ func Apply(ctx context.Context, target harnessstore.Store, bundle Bundle) (Apply
 		if err := tx.CreateWorkflowRun(ctx, bundle.Run); err != nil {
 			return err
 		}
+		terminal, failed := importedProgress(bundle.NodeRuns)
+		if err := tx.CreateWorkflowProgress(ctx, harnessmodel.WorkflowProgress{WorkflowRunID: bundle.Run.ID, TotalNodes: len(bundle.NodeRuns), TerminalNodes: terminal, FailedNodes: failed, UpdatedAt: bundle.Run.UpdatedAt}); err != nil {
+			return err
+		}
 		for _, rev := range bundle.Revisions {
 			if err := tx.CreateGraphRevision(ctx, rev); err != nil {
 				return err
@@ -60,6 +65,18 @@ func Apply(ctx context.Context, target harnessstore.Store, bundle Bundle) (Apply
 		return nil
 	})
 	return result, err
+}
+
+func importedProgress(nodes []harnessmodel.NodeRun) (terminal, failed int) {
+	for _, nr := range nodes {
+		if nr.State.Terminal() {
+			terminal++
+		}
+		if nr.State == harnessmodel.NodeFailed || nr.State == harnessmodel.NodeTimedOut {
+			failed++
+		}
+	}
+	return terminal, failed
 }
 
 func hasImportMarker(ctx context.Context, reader harnessstore.Reader, bundle Bundle) (bool, error) {
