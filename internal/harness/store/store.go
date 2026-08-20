@@ -68,7 +68,7 @@ type Tx interface {
 	CreateRetrySchedule(context.Context, harnessmodel.RetrySchedule) error
 	DeleteRetrySchedule(context.Context, harnessmodel.NodeRunID) error
 	ReserveRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string, time.Duration, int, time.Time) (harnessmodel.RetryBudget, bool, error)
-	UpsertCircuitBreaker(context.Context, harnessmodel.CircuitBreaker) error
-	CompareAndSwapCircuitBreaker(context.Context, harnessmodel.CircuitState, bool, harnessmodel.CircuitBreaker) error
+	CreateCircuitBreaker(context.Context, harnessmodel.CircuitBreaker) error
+	CompareAndSwapCircuitBreaker(context.Context, uint64, harnessmodel.CircuitBreaker) error
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
