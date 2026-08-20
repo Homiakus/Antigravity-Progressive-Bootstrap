@@ -28,14 +28,15 @@ func (s WorkflowState) Terminal() bool {
 }
 
 type WorkflowDefinition struct {
-	ID              WorkflowDefinitionID `json:"id"`
-	Version         int                  `json:"version"`
-	Name            string               `json:"name"`
-	CreatedAt       time.Time            `json:"createdAt"`
-	CompilerVersion string               `json:"compilerVersion"`
-	Nodes           []NodeSpec           `json:"nodes"`
-	EntryNodes      []NodeID             `json:"entryNodes,omitempty"`
-	Metadata        map[string]string    `json:"metadata,omitempty"`
+	ID              WorkflowDefinitionID       `json:"id"`
+	Version         int                        `json:"version"`
+	Name            string                     `json:"name"`
+	CreatedAt       time.Time                  `json:"createdAt"`
+	CompilerVersion string                     `json:"compilerVersion"`
+	Nodes           []NodeSpec                 `json:"nodes"`
+	EntryNodes      []NodeID                   `json:"entryNodes,omitempty"`
+	RetryPolicies   map[string]RetryPolicySpec `json:"retryPolicies,omitempty"`
+	Metadata        map[string]string          `json:"metadata,omitempty"`
 }
 
 type WorkflowRun struct {
