@@ -51,6 +51,9 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 	if err := verifyPragmas(got, opts); err != nil {
 		return closeWith(err)
 	}
+	if err := migrate(ctx, raw); err != nil {
+		return closeWith(fmt.Errorf("migrate SQLite: %w", err))
+	}
 	return &DB{db: raw, path: abs, opts: opts}, nil
 }
 
@@ -91,4 +94,11 @@ func (d *DB) Pragmas(ctx context.Context) (Pragmas, error) {
 		return Pragmas{}, fmt.Errorf("SQLite database is not open")
 	}
 	return readPragmas(ctx, d.db)
+}
+
+func (d *DB) SchemaVersion(ctx context.Context) (int, error) {
+	if d == nil || d.db == nil {
+		return 0, fmt.Errorf("SQLite database is not open")
+	}
+	return schemaVersion(ctx, d.db)
 }
