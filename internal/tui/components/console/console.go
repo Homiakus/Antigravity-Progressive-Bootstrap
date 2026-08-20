@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 )
 
@@ -46,7 +47,11 @@ func (m *Model) Addf(format string, a ...any) {
 
 func (m *Model) Clear() {
 	m.Logs = make([]LogEntry, 0)
-	m.Add("[INFO] Console cleared.")
+	if i18n.CurrentLanguage() == i18n.LangRU {
+		m.Add("[INFO] Консоль логов очищена.")
+	} else {
+		m.Add("[INFO] Console cleared.")
+	}
 }
 
 func (m Model) View() string {
@@ -62,8 +67,8 @@ func (m Model) View() string {
 		innerHeight = 3
 	}
 
-	// Header
-	sb.WriteString(t.ConsoleTitle.Render("> LIVE CONSOLE & LOGS") + "\n\n")
+	// Header with i18n
+	sb.WriteString(t.ConsoleTitle.Render("> "+i18n.T("live_console")) + "\n\n")
 
 	maxLines := innerHeight - 2
 	if maxLines < 1 {
@@ -75,7 +80,6 @@ func (m Model) View() string {
 		start = len(m.Logs) - maxLines
 	}
 
-	// Available width for log text after timestamp "[15:04:05] " (11 chars)
 	maxTextWidth := innerWidth - 11
 	if maxTextWidth < 10 {
 		maxTextWidth = 10
@@ -99,7 +103,7 @@ func (m Model) View() string {
 			lineContent = t.ConsoleErr.Render(line)
 		} else if strings.HasPrefix(line, "[CMD]") || strings.HasPrefix(line, "[EXEC]") {
 			lineContent = t.BadgePurple.Render(line)
-		} else if strings.HasPrefix(line, "[INFO]") {
+		} else if strings.HasPrefix(line, "[INFO]") || strings.HasPrefix(line, "[NAV]") {
 			lineContent = t.ConsoleInfo.Render(line)
 		} else {
 			lineContent = t.Body.Render(line)

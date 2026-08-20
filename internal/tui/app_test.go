@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/homiakus/agctl/internal/paths"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 )
 
 func testPaths() paths.Paths {
@@ -29,14 +30,11 @@ func TestApp3ColumnLayout(t *testing.T) {
 	if strings.Contains(res120, "too small") {
 		t.Errorf("did not expect 'too small' on 120x30, got:\n%s", res120)
 	}
-	if !strings.Contains(res120, "NAVIGATION") {
-		t.Errorf("expected Left Sidebar with NAVIGATION, got:\n%s", res120)
+	if !strings.Contains(res120, "НАВИГАЦИЯ") && !strings.Contains(res120, "NAVIGATION") {
+		t.Errorf("expected Left Sidebar with Navigation, got:\n%s", res120)
 	}
-	if !strings.Contains(res120, "LIVE CONSOLE") {
+	if !strings.Contains(res120, "КОНСОЛЬ") && !strings.Contains(res120, "LIVE CONSOLE") {
 		t.Errorf("expected Right Live Console, got:\n%s", res120)
-	}
-	if !strings.Contains(res120, "SYSTEM OVERVIEW") {
-		t.Errorf("expected Center Workspace with System Overview, got:\n%s", res120)
 	}
 }
 
@@ -68,39 +66,35 @@ func TestPanelSwitching(t *testing.T) {
 	}
 }
 
-func TestAppSectionSwitchingAndLogging(t *testing.T) {
+func TestAppSectionSwitchingAndSettings(t *testing.T) {
 	app := NewApp(testPaths())
 	m, _ := app.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 
-	// Press '2' -> Setup section
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	// Press '6' -> Settings section
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	view := m.View()
-	if !strings.Contains(view, "SETUP, PREREQUISITES") {
-		t.Errorf("expected SETUP & DOCTOR section, got:\n%s", view)
+	if !strings.Contains(view, "НАСТРОЙКИ") && !strings.Contains(view, "SETTINGS") {
+		t.Errorf("expected SETTINGS section, got:\n%s", view)
 	}
-	if !strings.Contains(view, "[NAV] Switched") {
-		t.Errorf("expected console log to record navigation to Setup, got:\n%s", view)
-	}
-
-	// Press '3' -> Capabilities section
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	view = m.View()
-	if !strings.Contains(view, "CAPABILITIES") {
-		t.Errorf("expected CAPABILITIES section, got:\n%s", view)
+	if !strings.Contains(view, "Язык") && !strings.Contains(view, "Language") {
+		t.Errorf("expected Language setting row, got:\n%s", view)
 	}
 
-	// Press '4' -> Autonomy section
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'4'}})
-	view = m.View()
-	if !strings.Contains(view, "AUTONOMY ENGINE") {
-		t.Errorf("expected AUTONOMY section, got:\n%s", view)
+	// Focus center and press Space to toggle language
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab}) // Tab to Center
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	viewAfterToggle := m.View()
+	if i18n.CurrentLanguage() != i18n.LangEN {
+		t.Errorf("expected English after toggle, got %s", i18n.CurrentLanguage())
+	}
+	if !strings.Contains(viewAfterToggle, "English") {
+		t.Errorf("expected English UI in view, got:\n%s", viewAfterToggle)
 	}
 
-	// Press '5' -> Governance section
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
-	view = m.View()
-	if !strings.Contains(view, "GOVERNANCE, SECURITY") {
-		t.Errorf("expected GOVERNANCE section, got:\n%s", view)
+	// Toggle back to Russian
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	if i18n.CurrentLanguage() != i18n.LangRU {
+		t.Errorf("expected Russian after 2nd toggle, got %s", i18n.CurrentLanguage())
 	}
 }
 

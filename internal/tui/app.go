@@ -20,11 +20,13 @@ import (
 	"github.com/homiakus/agctl/internal/tui/components/sidebar"
 	"github.com/homiakus/agctl/internal/tui/components/statusbar"
 	"github.com/homiakus/agctl/internal/tui/components/toast"
+	"github.com/homiakus/agctl/internal/tui/i18n"
 	"github.com/homiakus/agctl/internal/tui/theme"
 	"github.com/homiakus/agctl/internal/tui/views/autonomy"
 	"github.com/homiakus/agctl/internal/tui/views/capabilities"
 	"github.com/homiakus/agctl/internal/tui/views/dashboard"
 	"github.com/homiakus/agctl/internal/tui/views/governance"
+	"github.com/homiakus/agctl/internal/tui/views/settings"
 	"github.com/homiakus/agctl/internal/tui/views/setup"
 )
 
@@ -37,66 +39,73 @@ const (
 )
 
 type AppModel struct {
-	Paths     paths.Paths
-	Focus     FocusColumn
-	Sidebar   sidebar.Model
-	Console   console.Model
-	Header    header.Model
-	StatusBar statusbar.Model
-	Palette   palette.Model
-	Help      help.Model
-	Modal     modal.Model
-	Toast     toast.Model
-	DashView  dashboard.Model
-	SetupView setup.Model
-	CapView   capabilities.Model
-	AutoView  autonomy.Model
-	GovView   governance.Model
-	Width     int
-	Height    int
-	TooSmall  bool
+	Paths        paths.Paths
+	Focus        FocusColumn
+	Sidebar      sidebar.Model
+	Console      console.Model
+	Header       header.Model
+	StatusBar    statusbar.Model
+	Palette      palette.Model
+	Help         help.Model
+	Modal        modal.Model
+	Toast        toast.Model
+	DashView     dashboard.Model
+	SetupView    setup.Model
+	CapView      capabilities.Model
+	AutoView     autonomy.Model
+	GovView      governance.Model
+	SettingsView settings.Model
+	Width        int
+	Height       int
+	TooSmall     bool
 }
 
 type LogMsg string
 
 func NewApp(p paths.Paths) AppModel {
+	// Initialize stored settings (Language, Theme, Accent)
+	_ = i18n.LoadSettings(p.AppRoot)
+
 	commands := []palette.CommandItem{
-		{ID: "dash", Title: "Go to Dashboard", Category: "Nav", Description: "System metrics and quick overview", Shortcut: "1"},
-		{ID: "setup", Title: "Go to Setup & Doctor", Category: "Nav", Description: "Installers, diagnostics and updates", Shortcut: "2"},
-		{ID: "caps", Title: "Go to Capabilities", Category: "Nav", Description: "Skills, MCP Servers and Packs", Shortcut: "3"},
-		{ID: "auto", Title: "Go to Autonomy & Orchestration", Category: "Nav", Description: "Router, Loop and Headless Queue", Shortcut: "4"},
-		{ID: "gov", Title: "Go to Governance & Security", Category: "Nav", Description: "Permissions, Audit, Telemetry, Backups", Shortcut: "5"},
-		{ID: "install-rec", Title: "Run Recommended Install", Category: "Setup", Description: "Install core binary and essential meta-skills"},
-		{ID: "install-full", Title: "Run Full Stable Setup", Category: "Setup", Description: "Install all packs and verify MCP"},
-		{ID: "doctor", Title: "Run Doctor Diagnostics", Category: "Diagnostics", Description: "Complete health check"},
-		{ID: "probe", Title: "Live Probe MCP Servers", Category: "MCP", Description: "Ping active MCP tools"},
-		{ID: "clear-console", Title: "Clear Live Console", Category: "Console", Description: "Wipe console logs", Shortcut: "c"},
-		{ID: "help", Title: "Open Help Cheatsheet", Category: "Help", Description: "Show keybindings", Shortcut: "?"},
+		{ID: "dash", Title: "Панель управления (Dashboard)", Category: "Nav", Description: "Метрики и обзор системы", Shortcut: "1"},
+		{ID: "setup", Title: "Установка и Doctor (Setup)", Category: "Nav", Description: "Установка и диагностика", Shortcut: "2"},
+		{ID: "caps", Title: "Возможности и MCP (Capabilities)", Category: "Nav", Description: "Скиллы, серверы MCP", Shortcut: "3"},
+		{ID: "auto", Title: "Автономия и Loop (Autonomy)", Category: "Nav", Description: "Роутер и фоновая очередь", Shortcut: "4"},
+		{ID: "gov", Title: "Безопасность и Ops (Governance)", Category: "Nav", Description: "Политики и аудит", Shortcut: "5"},
+		{ID: "settings", Title: "Настройки программы (Settings)", Category: "Nav", Description: "Язык (RU/EN), тема, акценты", Shortcut: "6"},
+		{ID: "lang-toggle", Title: "Переключить язык (RU/EN)", Category: "Settings", Description: "Смена языка интерфейса"},
+		{ID: "install-rec", Title: "Рекомендованная установка", Category: "Setup", Description: "Установка ядра и meta-skills"},
+		{ID: "install-full", Title: "Полная установка", Category: "Setup", Description: "Все пакеты и sidecars"},
+		{ID: "doctor", Title: "Диагностика Doctor", Category: "Diagnostics", Description: "Полный аудит среды"},
+		{ID: "probe", Title: "Live Probe MCP", Category: "MCP", Description: "Опрос активных MCP серверов"},
+		{ID: "clear-console", Title: "Очистить консоль", Category: "Console", Description: "Очистить лог", Shortcut: "c"},
+		{ID: "help", Title: "Справка", Category: "Help", Description: "Горячие клавиши", Shortcut: "?"},
 	}
 
 	sb := sidebar.New()
 	sb.Focused = true
 
 	con := console.New()
-	con.Add("[INFO] agctl 3.2.1 initialized. 3-column desktop layout.")
-	con.Add("[INFO] Tab / Shift+Tab switches panels. 1..5 direct jump.")
+	con.Add("[INFO] agctl 3.2.1 initialized (RU default). 3-column desktop layout.")
+	con.Add("[INFO] Tab / Shift+Tab switches panels. 1..6 direct jump.")
 
 	return AppModel{
-		Paths:     p,
-		Focus:     FocusSidebar,
-		Sidebar:   sb,
-		Console:   con,
-		Header:    header.New("3.2.1"),
-		StatusBar: statusbar.New(),
-		Palette:   palette.New(commands),
-		Help:      help.New(),
-		Modal:     modal.New(),
-		Toast:     toast.New(),
-		DashView:  dashboard.New(p),
-		SetupView: setup.New(p),
-		CapView:   capabilities.New(p),
-		AutoView:  autonomy.New(p),
-		GovView:   governance.New(p),
+		Paths:        p,
+		Focus:        FocusSidebar,
+		Sidebar:      sb,
+		Console:      con,
+		Header:       header.New("3.2.1"),
+		StatusBar:    statusbar.New(),
+		Palette:      palette.New(commands),
+		Help:         help.New(),
+		Modal:        modal.New(),
+		Toast:        toast.New(),
+		DashView:     dashboard.New(p),
+		SetupView:    setup.New(p),
+		CapView:      capabilities.New(p),
+		AutoView:     autonomy.New(p),
+		GovView:      governance.New(p),
+		SettingsView: settings.New(p),
 	}
 }
 
@@ -153,6 +162,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.AutoView.Height = panelH
 		m.GovView.Width = centerW
 		m.GovView.Height = panelH
+		m.SettingsView.Width = centerW
+		m.SettingsView.Height = panelH
 		return m, nil
 
 	case LogMsg:
@@ -214,6 +225,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "5":
 			m.setSection(4)
+			return m, nil
+		case "6":
+			m.setSection(5)
 			return m, nil
 		case "tab":
 			m.Focus = (m.Focus + 1) % 3
@@ -303,6 +317,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.GovView, cmd = m.GovView.Update(msg)
 		cmds = append(cmds, cmd)
+	case 5: // Settings
+		var cmd tea.Cmd
+		m.SettingsView, cmd = m.SettingsView.Update(msg)
+		cmds = append(cmds, cmd)
+		m.syncFocus()
+		m.updateBreadcrumbs()
 	}
 
 	return m, tea.Batch(cmds...)
@@ -313,56 +333,79 @@ func (m *AppModel) setSection(idx int) {
 		return
 	}
 	m.Sidebar.Selected = idx
+	m.updateBreadcrumbs()
 	switch idx {
 	case 0:
-		m.Header.Breadcrumbs = []string{"DASHBOARD"}
 		m.DashView.Refresh()
-		m.Console.Addf("[NAV] Switched to 01 Dashboard")
+		m.Console.Addf("[NAV] %s", i18n.T("sec_dashboard"))
 	case 1:
-		m.Header.Breadcrumbs = []string{"SETUP & DOCTOR"}
-		m.Console.Addf("[NAV] Switched to 02 Setup & Doctor")
+		m.Console.Addf("[NAV] %s", i18n.T("sec_setup"))
 	case 2:
-		m.Header.Breadcrumbs = []string{"CAPABILITIES"}
 		m.CapView.Refresh()
-		m.Console.Addf("[NAV] Switched to 03 Capabilities")
+		m.Console.Addf("[NAV] %s", i18n.T("sec_caps"))
 	case 3:
-		m.Header.Breadcrumbs = []string{"AUTONOMY & ORCHESTRATION"}
 		m.AutoView.Refresh()
-		m.Console.Addf("[NAV] Switched to 04 Autonomy & Orchestration")
+		m.Console.Addf("[NAV] %s", i18n.T("sec_autonomy"))
 	case 4:
-		m.Header.Breadcrumbs = []string{"GOVERNANCE & OPS"}
 		m.GovView.Refresh()
-		m.Console.Addf("[NAV] Switched to 05 Governance & Safety")
+		m.Console.Addf("[NAV] %s", i18n.T("sec_governance"))
+	case 5:
+		m.Console.Addf("[NAV] %s", i18n.T("sec_settings"))
+	}
+}
+
+func (m *AppModel) updateBreadcrumbs() {
+	switch m.Sidebar.Selected {
+	case 0:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_dashboard")}
+	case 1:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_setup")}
+	case 2:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_caps")}
+	case 3:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_autonomy")}
+	case 4:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_governance")}
+	case 5:
+		m.Header.Breadcrumbs = []string{i18n.T("sec_settings")}
 	}
 }
 
 func (m *AppModel) syncFocus() {
 	m.Sidebar.Focused = m.Focus == FocusSidebar
 	m.Console.Focused = m.Focus == FocusConsole
+
+	moveText := i18n.T("hint_move")
+	selText := i18n.T("hint_select")
+	execText := i18n.T("hint_execute")
+	panelText := i18n.T("hint_panel")
+	cmdText := i18n.T("hint_commands")
+	helpText := i18n.T("hint_help")
+
 	switch m.Focus {
 	case FocusSidebar:
 		m.StatusBar.Hints = []statusbar.KeyHint{
-			{Key: "↑↓", Desc: "switch section"},
-			{Key: "enter/→", Desc: "workspace"},
-			{Key: "tab", Desc: "panel"},
-			{Key: "ctrl+k", Desc: "commands"},
-			{Key: "?", Desc: "help"},
+			{Key: "↑↓", Desc: moveText},
+			{Key: "enter/→", Desc: selText},
+			{Key: "tab", Desc: panelText},
+			{Key: "ctrl+k", Desc: cmdText},
+			{Key: "?", Desc: helpText},
 		}
 	case FocusCenter:
 		m.StatusBar.Hints = []statusbar.KeyHint{
-			{Key: "↑↓", Desc: "select action"},
-			{Key: "enter", Desc: "execute"},
+			{Key: "↑↓", Desc: moveText},
+			{Key: "enter/space", Desc: execText},
 			{Key: "←", Desc: "sidebar"},
 			{Key: "→", Desc: "console"},
-			{Key: "tab", Desc: "panel"},
-			{Key: "?", Desc: "help"},
+			{Key: "tab", Desc: panelText},
+			{Key: "?", Desc: helpText},
 		}
 	case FocusConsole:
 		m.StatusBar.Hints = []statusbar.KeyHint{
-			{Key: "c", Desc: "clear logs"},
+			{Key: "c", Desc: i18n.T("hint_clear")},
 			{Key: "←", Desc: "workspace"},
-			{Key: "tab", Desc: "sidebar"},
-			{Key: "?", Desc: "help"},
+			{Key: "tab", Desc: panelText},
+			{Key: "?", Desc: helpText},
 		}
 	}
 }
@@ -380,6 +423,20 @@ func (m AppModel) ExecutePaletteCommand(id string) (AppModel, tea.Cmd) {
 		m.setSection(3)
 	case "gov":
 		m.setSection(4)
+	case "settings":
+		m.setSection(5)
+
+	case "lang-toggle":
+		if i18n.CurrentLanguage() == i18n.LangRU {
+			i18n.SetLanguage(i18n.LangEN)
+			m.Console.Add("[SETTINGS] Language switched to English.")
+		} else {
+			i18n.SetLanguage(i18n.LangRU)
+			m.Console.Add("[SETTINGS] Язык интерфейса переключен на Русский.")
+		}
+		m.syncFocus()
+		m.updateBreadcrumbs()
+
 	case "clear-console":
 		m.Console.Clear()
 	case "help":
@@ -485,6 +542,8 @@ func (m AppModel) View() string {
 		centerContent = m.AutoView.View()
 	case 4:
 		centerContent = m.GovView.View()
+	case 5:
+		centerContent = m.SettingsView.View()
 	}
 
 	centerBoxStyle := t.Box

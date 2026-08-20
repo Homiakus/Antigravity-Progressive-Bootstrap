@@ -27,6 +27,7 @@ type KeyMap struct {
 	Tab3       key.Binding
 	Tab4       key.Binding
 	Tab5       key.Binding
+	Tab6       key.Binding
 }
 
 var Keys = KeyMap{
@@ -112,6 +113,10 @@ var Keys = KeyMap{
 	),
 	Tab5: key.NewBinding(
 		key.WithKeys("5"),
-		key.WithHelp("5", "Governance & Ops"),
+		key.WithHelp("5", "governance"),
+	),
+	Tab6: key.NewBinding(
+		key.WithKeys("6"),
+		key.WithHelp("6", "settings"),
 	),
 }
