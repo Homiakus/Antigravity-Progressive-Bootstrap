@@ -26,6 +26,9 @@ type Paths struct {
 	BinRoot            string
 	BackupsRoot        string
 	StateRoot          string
+	HarnessDB          string
+	ArtifactRoot       string
+	HarnessBackupRoot  string
 	RouterConfig       string
 	LoopConfig         string
 	OrchestratorConfig string
@@ -55,6 +58,9 @@ func Detect() (Paths, error) {
 	gemini := filepath.Join(home, ".gemini")
 	config := filepath.Join(gemini, "config")
 	app := filepath.Join(config, "agctl")
+	state := filepath.Join(app, "state")
+	backups := filepath.Join(app, "backups")
+	harnessState := filepath.Join(state, "harness")
 	return Paths{
 		Home:               home,
 		GeminiRoot:         gemini,
@@ -73,8 +79,11 @@ func Detect() (Paths, error) {
 		CLISettings:        filepath.Join(gemini, "antigravity-cli", "settings.json"),
 		AppRoot:            app,
 		BinRoot:            filepath.Join(app, "bin"),
-		BackupsRoot:        filepath.Join(app, "backups"),
-		StateRoot:          filepath.Join(app, "state"),
+		BackupsRoot:        backups,
+		StateRoot:          state,
+		HarnessDB:          filepath.Join(harnessState, "state.db"),
+		ArtifactRoot:       filepath.Join(harnessState, "artifacts"),
+		HarnessBackupRoot:  filepath.Join(backups, "harness"),
 		RouterConfig:       filepath.Join(app, "router.json"),
 		LoopConfig:         filepath.Join(app, "loop.json"),
 		OrchestratorConfig: filepath.Join(app, "orchestrator.json"),
@@ -101,10 +110,11 @@ func (p Paths) Ensure() error {
 	dirs := []string{
 		p.ConfigRoot, p.GlobalSkillsRoot, p.CLISkillsRoot, p.CLIPluginsRoot, p.GlobalAgentsRoot, p.GlobalPluginsRoot, p.SidecarsRoot, p.SidecarDataRoot,
 		p.AppRoot, p.BinRoot, p.BackupsRoot, p.StateRoot, p.LogRoot, p.ProfilesRoot, p.LocksRoot,
+		p.ArtifactRoot, p.HarnessBackupRoot, filepath.Dir(p.HarnessDB),
 		p.RegistryCacheRoot, p.TasksRoot, p.PlansRoot, p.SecurityRoot, p.ReplanRoot, p.ReplanInbox, p.ReplanArchive, p.TelemetryRoot,
 	}
 	for _, d := range dirs {
-		if d == "" {
+		if d == "" || d == "." {
 			continue
 		}
 		if err := os.MkdirAll(d, 0o755); err != nil {
