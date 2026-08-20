@@ -11,8 +11,8 @@ import (
 // ValidateCompiled re-validates a compiled durable definition at the engine
 // boundary. The compiler is the normal producer of WorkflowDefinition, but the
 // engine must not trust callers to have used it: a manually constructed or
-// deserialized definition must satisfy the same DAG/resource invariants before
-// any durable state is created.
+// deserialized definition must satisfy the same DAG/resource/retry invariants
+// before any durable state is created.
 func ValidateCompiled(def harnessmodel.WorkflowDefinition) error {
 	// WorkflowDefinitionID is an opaque durable identifier at this boundary.
 	// The built-in compiler emits the stricter generated-ID format, but imported
@@ -32,12 +32,13 @@ func ValidateCompiled(def harnessmodel.WorkflowDefinition) error {
 	}
 
 	return Validate(ir.Definition{
-		ID:         def.ID,
-		Version:    def.Version,
-		Name:       def.Name,
-		CreatedAt:  def.CreatedAt,
-		Nodes:      def.Nodes,
-		EntryNodes: def.EntryNodes,
-		Metadata:   def.Metadata,
+		ID:            def.ID,
+		Version:       def.Version,
+		Name:          def.Name,
+		CreatedAt:     def.CreatedAt,
+		Nodes:         def.Nodes,
+		EntryNodes:    def.EntryNodes,
+		RetryPolicies: def.RetryPolicies,
+		Metadata:      def.Metadata,
 	})
 }
