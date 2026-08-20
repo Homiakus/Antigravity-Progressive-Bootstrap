@@ -27,6 +27,9 @@ type Reader interface {
 	GetNodeRun(context.Context, harnessmodel.NodeRunID) (harnessmodel.NodeRun, error)
 	GetAttempt(context.Context, harnessmodel.AttemptID) (harnessmodel.Attempt, error)
 	ListDependentNodeRuns(context.Context, harnessmodel.WorkflowRunID, harnessmodel.NodeID) ([]harnessmodel.NodeRun, error)
+	GetReadyNode(context.Context, harnessmodel.NodeRunID) (harnessmodel.ReadyNode, error)
+	ListReadyWorkflowLanes(context.Context, time.Time, int) ([]harnessmodel.WorkflowScheduleState, error)
+	ListReadyNodes(context.Context, harnessmodel.WorkflowRunID, time.Time, int) ([]harnessmodel.ReadyNode, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -44,5 +47,10 @@ type Tx interface {
 	DecrementNodeRemainingDependencies(context.Context, harnessmodel.NodeRunID, time.Time) (int, error)
 	CreateNextAttempt(context.Context, harnessmodel.Attempt) (harnessmodel.Attempt, error)
 	CompareAndSwapAttempt(context.Context, harnessmodel.AttemptState, harnessmodel.Attempt) error
+	CreateWorkflowScheduleState(context.Context, harnessmodel.WorkflowScheduleState) error
+	EnqueueReadyNode(context.Context, harnessmodel.NodeRunID, time.Time, time.Time, string) error
+	RemoveReadyNode(context.Context, harnessmodel.NodeRunID) error
+	SetReadyWait(context.Context, harnessmodel.NodeRunID, harnessmodel.WaitReason, string, time.Time) error
+	RecordWorkflowService(context.Context, harnessmodel.WorkflowRunID, time.Time) error
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
