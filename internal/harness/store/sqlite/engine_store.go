@@ -72,14 +72,15 @@ RETURNING workflow_run_id, total_nodes, terminal_nodes, failed_nodes, updated_at
 
 func (t *transaction) GetNodeRun(ctx context.Context, id harnessmodel.NodeRunID) (harnessmodel.NodeRun, error) {
 	return scanNodeRun(t.tx.QueryRowContext(ctx, `
-SELECT id, workflow_run_id, node_id, graph_revision, generation, state, remaining_dependencies, created_at, updated_at
+SELECT id, workflow_run_id, node_id, graph_revision, generation, state,
+       remaining_dependencies, priority, effective_priority, created_at, updated_at
 FROM node_runs WHERE id=?`, string(id)))
 }
 
 func scanNodeRun(row interface{ Scan(...any) error }) (harnessmodel.NodeRun, error) {
 	var nr harnessmodel.NodeRun
 	var id, runID, nodeID, state, created, updated string
-	if err := row.Scan(&id, &runID, &nodeID, &nr.GraphRevision, &nr.Generation, &state, &nr.RemainingDependencies, &created, &updated); err != nil {
+	if err := row.Scan(&id, &runID, &nodeID, &nr.GraphRevision, &nr.Generation, &state, &nr.RemainingDependencies, &nr.Priority, &nr.EffectivePriority, &created, &updated); err != nil {
 		return harnessmodel.NodeRun{}, mapNotFound(err)
 	}
 	nr.ID = harnessmodel.NodeRunID(id)
@@ -98,7 +99,8 @@ func scanNodeRun(row interface{ Scan(...any) error }) (harnessmodel.NodeRun, err
 
 func (t *transaction) ListDependentNodeRuns(ctx context.Context, runID harnessmodel.WorkflowRunID, parentNodeID harnessmodel.NodeID) ([]harnessmodel.NodeRun, error) {
 	rows, err := t.tx.QueryContext(ctx, `
-SELECT nr.id, nr.workflow_run_id, nr.node_id, nr.graph_revision, nr.generation, nr.state, nr.remaining_dependencies, nr.created_at, nr.updated_at
+SELECT nr.id, nr.workflow_run_id, nr.node_id, nr.graph_revision, nr.generation, nr.state,
+       nr.remaining_dependencies, nr.priority, nr.effective_priority, nr.created_at, nr.updated_at
 FROM node_runs nr
 JOIN dependencies d
   ON d.definition_id=nr.definition_id
@@ -137,12 +139,25 @@ func (t *transaction) CompareAndSwapNodeRun(ctx context.Context, expected harnes
 	}
 	res, err := t.tx.ExecContext(ctx, `
 UPDATE node_runs
-SET state=?, remaining_dependencies=?, updated_at=?
-WHERE id=? AND state=?`, string(nr.State), nr.RemainingDependencies, formatTime(nr.UpdatedAt), string(nr.ID), string(expected))
+SET state=?, remaining_dependencies=?, priority=?, effective_priority=?, updated_at=?
+WHERE id=? AND state=?`, string(nr.State), nr.RemainingDependencies, nr.Priority, nr.EffectivePriority, formatTime(nr.UpdatedAt), string(nr.ID), string(expected))
 	if err != nil {
 		return fmt.Errorf("CAS node run: %w", err)
 	}
-	return requireOneAffected(res)
+	if err := requireOneAffected(res); err != nil {
+		return err
+	}
+	if expected == harnessmodel.NodeReady && nr.State != harnessmodel.NodeReady {
+		if err := t.RemoveReadyNode(ctx, nr.ID); err != nil {
+			return err
+		}
+	}
+	if expected != harnessmodel.NodeReady && nr.State == harnessmodel.NodeReady {
+		if err := t.EnqueueReadyNode(ctx, nr.ID, nr.UpdatedAt, time.Time{}, ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *transaction) DecrementNodeRemainingDependencies(ctx context.Context, id harnessmodel.NodeRunID, updatedAt time.Time) (int, error) {
