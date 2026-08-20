@@ -48,6 +48,19 @@ func New(store harnessstore.Store, opts Options) (*Scheduler, error) {
 	return &Scheduler{store: store, capacity: opts.Capacity, laneLimit: laneLimit, candidateLimit: candidateLimit, now: now}, nil
 }
 
+func (s *Scheduler) SetWorkflowWeight(ctx context.Context, runID harnessmodel.WorkflowRunID, weight int) error {
+	if runID == "" {
+		return fmt.Errorf("workflow run id is required")
+	}
+	if weight <= 0 {
+		return fmt.Errorf("workflow weight must be > 0")
+	}
+	now := s.now().UTC()
+	return s.store.Update(ctx, func(tx harnessstore.Tx) error {
+		return tx.SetWorkflowScheduleWeight(ctx, runID, weight, now)
+	})
+}
+
 // Next returns one feasible READY node. Selection is two-level: first choose a
 // workflow lane by normalized durable service (service_count/weight), then the
 // highest effective priority node inside that lane. The decision is not an
