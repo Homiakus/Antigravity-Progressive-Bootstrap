@@ -12,11 +12,20 @@ type BreakerPolicy struct {
 	Cooldown         time.Duration
 }
 
+// CircuitTicket identifies the durable breaker revision under which a service
+// call was admitted. Probe tickets are ownership fences for HALF_OPEN results.
+type CircuitTicket struct {
+	ServiceKey string `json:"serviceKey"`
+	Revision   uint64 `json:"revision"`
+	Probe      bool   `json:"probe,omitempty"`
+}
+
 type BreakerDecision struct {
-	Breaker harnessmodel.CircuitBreaker
-	Allow   bool
-	Probe   bool
-	Reason  string
+	Breaker harnessmodel.CircuitBreaker `json:"breaker"`
+	Ticket  CircuitTicket               `json:"ticket,omitempty"`
+	Allow   bool                        `json:"allow"`
+	Probe   bool                        `json:"probe,omitempty"`
+	Reason  string                      `json:"reason"`
 }
 
 // Allow checks whether a service call may start. OPEN transitions to HALF_OPEN
