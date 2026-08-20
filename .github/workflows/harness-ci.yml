@@ -32,3 +32,22 @@ jobs:
 
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
+
+      - name: Stage 1 store smoke benchmarks
+        run: go test ./internal/harness/store/sqlite -run '^$' -bench 'Benchmark(StateTransition|EventAppend)$' -benchtime=1x -benchmem
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Windows tests
+        run: go test ./...
