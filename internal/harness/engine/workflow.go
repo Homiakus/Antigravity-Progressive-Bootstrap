@@ -19,6 +19,7 @@ func (e *Engine) StartWorkflow(ctx context.Context, def harnessmodel.WorkflowDef
 		return harnessmodel.WorkflowRun{}, fmt.Errorf("validate workflow definition: %w", err)
 	}
 	now := e.now().UTC()
+	effective := effectivePriorities(def.Nodes)
 	rawRunID, err := e.nextID(harnessmodel.IDWorkflowRun)
 	if err != nil {
 		return harnessmodel.WorkflowRun{}, err
@@ -40,6 +41,9 @@ func (e *Engine) StartWorkflow(ctx context.Context, def harnessmodel.WorkflowDef
 			return err
 		}
 		if err := tx.CreateWorkflowProgress(ctx, harnessmodel.WorkflowProgress{WorkflowRunID: run.ID, TotalNodes: len(def.Nodes), UpdatedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.CreateWorkflowScheduleState(ctx, harnessmodel.WorkflowScheduleState{WorkflowRunID: run.ID, Weight: 1, UpdatedAt: now}); err != nil {
 			return err
 		}
 		if err := tx.CreateGraphRevision(ctx, harnessmodel.GraphRevision{WorkflowRunID: run.ID, Number: 1, CreatedAt: now, Reason: "initial workflow graph"}); err != nil {
@@ -67,11 +71,16 @@ func (e *Engine) StartWorkflow(ctx context.Context, def harnessmodel.WorkflowDef
 				UpdatedAt:             now,
 				State:                 nodeState,
 				RemainingDependencies: len(node.Dependencies),
+				Priority:              node.Priority,
+				EffectivePriority:     effective[node.ID],
 			}
 			if err := tx.CreateNodeRun(ctx, nr); err != nil {
 				return err
 			}
 			if nodeState == harnessmodel.NodeReady {
+				if err := tx.EnqueueReadyNode(ctx, nr.ID, now, time.Time{}, ""); err != nil {
+					return err
+				}
 				ready = append(ready, nr)
 			}
 		}
@@ -85,7 +94,7 @@ func (e *Engine) StartWorkflow(ctx context.Context, def harnessmodel.WorkflowDef
 			return err
 		}
 		for _, nr := range ready {
-			if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeReady", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "remainingDependencies": 0}); err != nil {
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeReady", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "remainingDependencies": 0, "priority": nr.Priority, "effectivePriority": nr.EffectivePriority}); err != nil {
 				return err
 			}
 		}
