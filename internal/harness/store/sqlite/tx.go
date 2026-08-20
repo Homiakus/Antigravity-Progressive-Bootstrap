@@ -22,10 +22,10 @@ var _ harnessstore.Tx = (*transaction)(nil)
 var _ harnessstore.Reader = (*transaction)(nil)
 
 func (d *DB) View(ctx context.Context, fn func(harnessstore.Reader) error) error {
-	if d == nil || d.db == nil {
+	if d == nil || d.readDB == nil {
 		return fmt.Errorf("SQLite database is not open")
 	}
-	tx, err := d.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := d.readDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return fmt.Errorf("begin SQLite view transaction: %w", err)
 	}
@@ -43,6 +43,9 @@ func (d *DB) Update(ctx context.Context, fn func(harnessstore.Tx) error) error {
 	if d == nil || d.db == nil {
 		return fmt.Errorf("SQLite database is not open")
 	}
+	// d.db is opened with modernc.org/sqlite _txlock=immediate and a single
+	// connection, so write transactions acquire writer intent at BEGIN rather
+	// than racing a deferred read->write upgrade.
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin SQLite update transaction: %w", err)
