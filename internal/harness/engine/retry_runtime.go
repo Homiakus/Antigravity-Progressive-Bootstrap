@@ -91,42 +91,33 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 			if err := authorizeTerminalDuplicate(attempt, fence); err != nil {
 				return err
 			}
-			schedule, err := tx.GetRetrySchedule(ctx, nr.ID)
-			if err == nil {
-				if schedule.FailedAttemptID != attempt.ID {
-					return fmt.Errorf("retry schedule for node %s belongs to attempt %s, not %s: %w", nr.ID, schedule.FailedAttemptID, attempt.ID, harnessstore.ErrConflict)
+			// The immutable history row is written by a SQLite trigger in the
+			// same transaction as the active retry schedule. Unlike the active
+			// row it survives RetryReady, later attempts and later terminal node
+			// outcomes, so a duplicate report can always recover the original
+			// decision for this exact failed Attempt.
+			schedule, err := tx.GetRetryScheduleByAttempt(ctx, attempt.ID)
+			if err != nil {
+				if errors.Is(err, harnessstore.ErrNotFound) {
+					return errRetryTerminal
 				}
-				run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
-				if err != nil {
-					return err
-				}
-				result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
-				result.Decision = harnessretry.Decision{Retry: true, NotBefore: schedule.NotBefore, Delay: schedule.NotBefore.Sub(schedule.ScheduledAt), Reason: "retry already scheduled"}
-				result.RetrySchedule = &schedule
-				return nil
-			}
-			if !errors.Is(err, harnessstore.ErrNotFound) {
 				return err
+			}
+			if schedule.NodeRunID != nr.ID {
+				return fmt.Errorf("retry history for attempt %s belongs to node %s, not %s: %w", attempt.ID, schedule.NodeRunID, nr.ID, harnessstore.ErrConflict)
 			}
 			run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
 			if err != nil {
 				return err
 			}
 			result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
-			// Active retry schedules are intentionally deleted once RETRY_WAIT is
-			// released. A late duplicate for that failed Attempt must preserve the
-			// original retry decision instead of being misreported as terminal.
-			switch nr.State {
-			case harnessmodel.NodeReady, harnessmodel.NodeQueued, harnessmodel.NodeRunning,
-				harnessmodel.NodeWaiting, harnessmodel.NodeInDoubt, harnessmodel.NodeUnschedulable,
-				harnessmodel.NodeSucceeded, harnessmodel.NodeTimedOut, harnessmodel.NodeCancelled:
-				result.Decision = harnessretry.Decision{Retry: true, Reason: "retry already released or advanced"}
-				return nil
-			case harnessmodel.NodeRetryWait:
-				return fmt.Errorf("node %s is RETRY_WAIT but durable retry schedule is missing: %w", nr.ID, harnessstore.ErrConflict)
-			default:
-				return errRetryTerminal
+			result.Decision = harnessretry.Decision{
+				Retry: true, NotBefore: schedule.NotBefore,
+				Delay: schedule.NotBefore.Sub(schedule.ScheduledAt),
+				Reason: "retry decision recovered from durable history",
 			}
+			result.RetrySchedule = &schedule
+			return nil
 		}
 		if attempt.State != harnessmodel.AttemptRunning {
 			return fmt.Errorf("cannot retry failure attempt %s from state %s", attempt.ID, attempt.State)
