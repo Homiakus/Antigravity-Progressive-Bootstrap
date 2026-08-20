@@ -50,7 +50,7 @@ func TestStartWorkflowRejectsInvalidCompiledDefinitionBeforePersistence(t *testi
 			if _, err := eng.StartWorkflow(ctx, def); err == nil || !strings.Contains(strings.ToLower(err.Error()), tt.want) {
 				t.Fatalf("StartWorkflow error=%v want substring %q", err, tt.want)
 			}
-			for _, table := range []string{"workflow_definitions", "workflow_runs", "workflow_progress", "graph_revisions", "node_runs", "events"} {
+			for _, table := range []string{"workflow_definitions", "workflow_runs", "workflow_progress", "workflow_schedule_state", "graph_revisions", "node_runs", "ready_queue", "events"} {
 				var count int
 				if err := db.SQLDB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
 					t.Fatal(err)
