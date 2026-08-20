@@ -27,7 +27,8 @@ func TestLateDuplicateAfterRetryReleasePreservesOriginalRetryDecision(t *testing
 	if first.RetrySchedule == nil {
 		t.Fatal("retry schedule missing")
 	}
-	clock.current = first.RetrySchedule.NotBefore
+	original := *first.RetrySchedule
+	clock.current = original.NotBefore
 	if _, err := eng.ReleaseDueRetries(ctx, 10); err != nil {
 		t.Fatal(err)
 	}
@@ -38,8 +39,11 @@ func TestLateDuplicateAfterRetryReleasePreservesOriginalRetryDecision(t *testing
 	if late.Terminal || !late.Decision.Retry || !late.Completion.Idempotent {
 		t.Fatalf("late duplicate lost original retry semantics: %+v", late)
 	}
-	if late.RetrySchedule != nil {
-		t.Fatalf("released retry unexpectedly recreated active schedule: %+v", late.RetrySchedule)
+	if late.RetrySchedule == nil || late.RetrySchedule.FailedAttemptID != attempt.ID || !late.RetrySchedule.NotBefore.Equal(original.NotBefore) || late.RetrySchedule.PolicyRef != original.PolicyRef {
+		t.Fatalf("late duplicate did not recover immutable retry decision: original=%+v late=%+v", original, late.RetrySchedule)
+	}
+	if !late.Decision.NotBefore.Equal(original.NotBefore) || late.Decision.Delay != original.NotBefore.Sub(original.ScheduledAt) {
+		t.Fatalf("late duplicate decision changed timing: original=%+v late=%+v", original, late.Decision)
 	}
 	if late.Completion.NodeRun.State != harnessmodel.NodeReady || late.Completion.WorkflowRun.State != harnessmodel.WorkflowRunning {
 		t.Fatalf("late duplicate changed runtime state: %+v", late.Completion)
