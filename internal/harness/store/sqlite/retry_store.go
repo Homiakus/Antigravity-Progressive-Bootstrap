@@ -15,10 +15,10 @@ func (t *transaction) CreateRetrySchedule(ctx context.Context, schedule harnessm
 		return fmt.Errorf("invalid retry schedule")
 	}
 	_, err := t.tx.ExecContext(ctx, `
-INSERT INTO retry_schedule(node_run_id, workflow_run_id, failed_attempt_id, attempt_number, failure_class, policy_ref, service_key, scheduled_at, not_before)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+INSERT INTO retry_schedule(node_run_id, workflow_run_id, failed_attempt_id, attempt_number, failure_class, policy_ref, service_key, scheduled_at, not_before, not_before_ns)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(schedule.NodeRunID), string(schedule.WorkflowRunID), string(schedule.FailedAttemptID), schedule.AttemptNumber,
-		string(schedule.FailureClass), schedule.PolicyRef, schedule.ServiceKey, formatTime(schedule.ScheduledAt), formatTime(schedule.NotBefore))
+		string(schedule.FailureClass), schedule.PolicyRef, schedule.ServiceKey, formatTime(schedule.ScheduledAt), formatTime(schedule.NotBefore), schedule.NotBefore.UnixNano())
 	if err != nil {
 		return fmt.Errorf("insert retry schedule: %w", err)
 	}
@@ -41,9 +41,9 @@ func (t *transaction) ListDueRetries(ctx context.Context, now time.Time, limit i
 	rows, err := t.tx.QueryContext(ctx, `
 SELECT node_run_id, workflow_run_id, failed_attempt_id, attempt_number, failure_class, policy_ref, service_key, scheduled_at, not_before
 FROM retry_schedule
-WHERE not_before<=?
-ORDER BY not_before, workflow_run_id, node_run_id
-LIMIT ?`, formatTime(now), limit)
+WHERE not_before_ns<=?
+ORDER BY not_before_ns, workflow_run_id, node_run_id
+LIMIT ?`, now.UnixNano(), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list due retries: %w", err)
 	}
