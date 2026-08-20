@@ -7,6 +7,9 @@ import (
 	"os"
 
 	"github.com/homiakus/agctl/internal/harness/migratelegacy"
+	"github.com/homiakus/agctl/internal/harness/resource"
+	"github.com/homiakus/agctl/internal/harness/scheduler"
+	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	sqlitestore "github.com/homiakus/agctl/internal/harness/store/sqlite"
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/planner"
@@ -56,12 +59,13 @@ type harnessStatus struct {
 	DurableDefinitions int    `json:"durableDefinitions"`
 	DurableRuns        int    `json:"durableRuns"`
 	DurableNodeRuns    int    `json:"durableNodeRuns"`
+	DurableReadyNodes  int    `json:"durableReadyNodes"`
 	DurableEvents      int    `json:"durableEvents"`
 }
 
 func runHarness(p paths.Paths, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status")
+		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status | explain --node-run ID")
 	}
 	switch args[0] {
 	case "migrate":
@@ -73,8 +77,18 @@ func runHarness(p paths.Paths, args []string) error {
 		return runHarnessMigrate(p, *dryRun)
 	case "status":
 		return runHarnessStatus(p)
+	case "explain":
+		fs := flag.NewFlagSet("harness explain", flag.ContinueOnError)
+		nodeRunID := fs.String("node-run", "", "durable node run id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *nodeRunID == "" {
+			return fmt.Errorf("--node-run is required")
+		}
+		return runHarnessExplain(p, harnessmodel.NodeRunID(*nodeRunID))
 	default:
-		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status")
+		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status | explain --node-run ID")
 	}
 }
 
@@ -149,6 +163,7 @@ func runHarnessStatus(p paths.Paths) error {
 		{"SELECT COUNT(*) FROM workflow_definitions", &status.DurableDefinitions},
 		{"SELECT COUNT(*) FROM workflow_runs", &status.DurableRuns},
 		{"SELECT COUNT(*) FROM node_runs", &status.DurableNodeRuns},
+		{"SELECT COUNT(*) FROM ready_queue", &status.DurableReadyNodes},
 		{"SELECT COUNT(*) FROM events", &status.DurableEvents},
 	}
 	for _, q := range queries {
@@ -157,5 +172,31 @@ func runHarnessStatus(p paths.Paths) error {
 		}
 	}
 	printJSON(status)
+	return nil
+}
+
+func runHarnessExplain(p paths.Paths, nodeRunID harnessmodel.NodeRunID) error {
+	ctx := context.Background()
+	db, err := sqlitestore.Open(ctx, p.HarnessDB, sqlitestore.Options{})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	cfg, err := tasks.LoadConfig(p)
+	if err != nil {
+		return err
+	}
+	sched, err := scheduler.New(db, scheduler.Options{Capacity: resource.Capacity{
+		CPUWeight: cfg.CPUWeight, MemoryBytes: 1 << 62, GPUCount: 0, MaxVRAMBytes: 0,
+		DiskBytes: 1 << 62, BuildSlots: cfg.BuildSlots, BrowserSlots: cfg.BrowserSlots,
+	}})
+	if err != nil {
+		return err
+	}
+	explanation, err := sched.ExplainNode(ctx, nodeRunID)
+	if err != nil {
+		return err
+	}
+	printJSON(explanation)
 	return nil
 }
