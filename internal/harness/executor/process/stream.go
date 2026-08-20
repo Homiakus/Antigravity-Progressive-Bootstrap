@@ -27,11 +27,16 @@ func (w *streamWriter) Write(p []byte) (int, error) {
 	w.count.Add(int64(len(copyChunk)))
 	w.lastActivity.Store(at.UnixNano())
 	w.tail.Write(copyChunk)
+	if w.ctx.Err() != nil {
+		// The sink has already failed/cancelled. Keep accepting child output so
+		// os/exec can drain its pipe, but do not enqueue any more downstream data.
+		return len(p), nil
+	}
 	select {
 	case w.chunks <- harnessexecutor.LogChunk{At: at, Stream: w.stream, Data: copyChunk}:
 	case <-w.ctx.Done():
-		// Once a sink fails/cancels, continue draining the OS pipe while dropping
-		// downstream chunks. This protects the child from deadlocking on output.
+		// Sink failure raced this send. Dropping the chunk is preferable to
+		// blocking the child process on an unavailable log consumer.
 	}
 	return len(p), nil
 }
