@@ -49,6 +49,18 @@ CREATE TABLE retry_schedule (
 CREATE INDEX retry_schedule_due
     ON retry_schedule(not_before_ns, workflow_run_id, node_run_id);
 
+CREATE TRIGGER retry_schedule_journal_insert
+AFTER INSERT ON retry_schedule
+BEGIN
+    INSERT INTO retry_schedule_history(
+        failed_attempt_id, node_run_id, workflow_run_id, attempt_number,
+        failure_class, policy_ref, service_key, scheduled_at, not_before, not_before_ns
+    ) VALUES(
+        NEW.failed_attempt_id, NEW.node_run_id, NEW.workflow_run_id, NEW.attempt_number,
+        NEW.failure_class, NEW.policy_ref, NEW.service_key, NEW.scheduled_at, NEW.not_before, NEW.not_before_ns
+    );
+END;
+
 CREATE TABLE retry_budgets (
     scope TEXT NOT NULL,
     scope_key TEXT NOT NULL,
