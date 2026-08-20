@@ -8,6 +8,8 @@ import (
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 )
 
+const maxDuration = time.Duration(1<<63 - 1)
+
 func ComputeDelay(policy harnessmodel.RetryPolicySpec, failedAttemptNumber int, random func() float64) (time.Duration, error) {
 	if failedAttemptNumber < 1 {
 		return 0, fmt.Errorf("failed attempt number must be >= 1")
@@ -26,17 +28,22 @@ func ComputeDelay(policy harnessmodel.RetryPolicySpec, failedAttemptNumber int, 
 	if factor == 0 {
 		factor = 2
 	}
-	delay := float64(policy.InitialDelay)
-	if failedAttemptNumber > 1 && delay > 0 {
-		power := math.Pow(factor, float64(failedAttemptNumber-1))
-		delay *= power
+	capDelay := maxDuration
+	if policy.MaxDelay > 0 {
+		capDelay = policy.MaxDelay
 	}
-	if delay > float64(math.MaxInt64) {
-		delay = float64(math.MaxInt64)
+	base := policy.InitialDelay
+	for i := 1; i < failedAttemptNumber && base > 0 && base < capDelay; i++ {
+		next := float64(base) * factor
+		// Keep conversion back to time.Duration strictly inside int64 range.
+		if math.IsInf(next, 1) || next >= float64(capDelay)-4096 {
+			base = capDelay
+			break
+		}
+		base = time.Duration(next)
 	}
-	base := time.Duration(delay)
-	if policy.MaxDelay > 0 && base > policy.MaxDelay {
-		base = policy.MaxDelay
+	if base > capDelay {
+		base = capDelay
 	}
 	if base <= 0 || policy.Jitter == 0 {
 		return base, nil
@@ -51,15 +58,15 @@ func ComputeDelay(policy harnessmodel.RetryPolicySpec, failedAttemptNumber int, 
 	}
 	multiplier := (1 - policy.Jitter) + (2 * policy.Jitter * r)
 	jittered := float64(base) * multiplier
-	if jittered < 0 {
-		jittered = 0
+	if jittered <= 0 {
+		return 0, nil
 	}
-	if jittered > float64(math.MaxInt64) {
-		jittered = float64(math.MaxInt64)
+	if math.IsInf(jittered, 1) || jittered >= float64(capDelay)-4096 {
+		return capDelay, nil
 	}
 	result := time.Duration(jittered)
-	if policy.MaxDelay > 0 && result > policy.MaxDelay {
-		result = policy.MaxDelay
+	if result > capDelay {
+		result = capDelay
 	}
 	return result, nil
 }
