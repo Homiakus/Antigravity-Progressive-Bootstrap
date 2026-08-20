@@ -15,13 +15,14 @@ CREATE TABLE retry_schedule (
     service_key TEXT NOT NULL DEFAULT '',
     scheduled_at TEXT NOT NULL,
     not_before TEXT NOT NULL,
+    not_before_ns INTEGER NOT NULL,
     FOREIGN KEY(node_run_id) REFERENCES node_runs(id) ON DELETE CASCADE,
     FOREIGN KEY(workflow_run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE,
     FOREIGN KEY(failed_attempt_id) REFERENCES attempts(id) ON DELETE CASCADE
 );
 
 CREATE INDEX retry_schedule_due
-    ON retry_schedule(not_before, workflow_run_id, node_run_id);
+    ON retry_schedule(not_before_ns, workflow_run_id, node_run_id);
 
 CREATE TABLE retry_budgets (
     scope TEXT NOT NULL,
