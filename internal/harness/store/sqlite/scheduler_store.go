@@ -24,6 +24,18 @@ VALUES(?, ?, ?, ?, ?)`, string(s.WorkflowRunID), s.Weight, s.ServiceCount, nulla
 	return nil
 }
 
+func (t *transaction) SetWorkflowScheduleWeight(ctx context.Context, runID harnessmodel.WorkflowRunID, weight int, updatedAt time.Time) error {
+	if runID == "" || weight <= 0 || updatedAt.IsZero() {
+		return fmt.Errorf("workflow run id, positive weight and updated time are required")
+	}
+	res, err := t.tx.ExecContext(ctx, `
+UPDATE workflow_schedule_state SET weight=?, updated_at=? WHERE workflow_run_id=?`, weight, formatTime(updatedAt), string(runID))
+	if err != nil {
+		return fmt.Errorf("set workflow scheduler weight: %w", err)
+	}
+	return requireOneAffected(res)
+}
+
 func (t *transaction) EnqueueReadyNode(ctx context.Context, nodeRunID harnessmodel.NodeRunID, readyAt, notBefore time.Time, resourceClass string) error {
 	if nodeRunID == "" || readyAt.IsZero() {
 		return fmt.Errorf("node run id and ready time are required")
@@ -181,7 +193,8 @@ func (t *transaction) ListReadyNodes(ctx context.Context, runID harnessmodel.Wor
 WHERE rq.workflow_run_id=?
   AND nr.state=?
   AND (rq.not_before IS NULL OR rq.not_before<=?)
-ORDER BY rq.effective_priority DESC, rq.priority DESC, rq.ready_at ASC, rq.node_run_id ASC
+ORDER BY CASE WHEN rq.wait_reason='' THEN 0 ELSE 1 END ASC,
+         rq.effective_priority DESC, rq.priority DESC, rq.ready_at ASC, rq.node_run_id ASC
 LIMIT ?`, string(runID), string(harnessmodel.NodeReady), formatTime(now), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list ready nodes: %w", err)
