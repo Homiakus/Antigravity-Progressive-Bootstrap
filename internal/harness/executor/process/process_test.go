@@ -148,9 +148,13 @@ func TestIdleTimeoutTerminatesSilentProcess(t *testing.T) {
 
 func TestRegularOutputPreventsIdleTimeout(t *testing.T) {
 	executor := New(Options{})
-	prepared := helperPrepared(t, executor, "idle-active", "paced", "8", "50ms")
-	prepared.Request.Timeouts.Idle = 150 * time.Millisecond
-	prepared.Request.Timeouts.Execution = 2 * time.Second
+	// Keep the helper alive for well beyond the idle deadline so the test still
+	// fails if activity updates are broken, while leaving enough shutdown margin
+	// for a race-instrumented child process (whose runtime teardown is much
+	// slower than a normal binary).
+	prepared := helperPrepared(t, executor, "idle-active", "paced", "24", "50ms")
+	prepared.Request.Timeouts.Idle = 500 * time.Millisecond
+	prepared.Request.Timeouts.Execution = 4 * time.Second
 	result, err := executor.Execute(context.Background(), prepared, nil)
 	if err != nil {
 		t.Fatalf("active process hit idle timeout: result=%+v err=%v", result, err)
@@ -294,7 +298,9 @@ func TestProcessHelperProcess(t *testing.T) {
 		interval, _ := time.ParseDuration(params[1])
 		for i := 0; i < count; i++ {
 			_, _ = fmt.Fprintf(os.Stdout, "tick-%d\n", i)
-			time.Sleep(interval)
+			if i+1 < count {
+				time.Sleep(interval)
+			}
 		}
 	case "emit":
 		total, _ := strconv.Atoi(params[1])
