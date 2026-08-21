@@ -15,9 +15,12 @@ func (t *transaction) ListEffectIntentsByAttempt(ctx context.Context, attemptID 
 		limit = 1000
 	}
 	rows, err := t.tx.QueryContext(ctx, effectSelect+`
-JOIN effect_attempt_bindings eab ON eab.effect_intent_id=effect_intents.effect_intent_id
-WHERE eab.attempt_id=?
-ORDER BY eab.bound_at, effect_intents.effect_intent_id
+WHERE EXISTS (
+    SELECT 1 FROM effect_attempt_bindings eab
+    WHERE eab.effect_intent_id=effect_intents.effect_intent_id
+      AND eab.attempt_id=?
+)
+ORDER BY effect_intents.prepared_at, effect_intents.effect_intent_id
 LIMIT ?`, string(attemptID), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list effect intents by attempt: %w", err)
