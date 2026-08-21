@@ -61,6 +61,7 @@ type Reader interface {
 	GetEffectIntent(context.Context, harnessmodel.EffectIntentID) (harnessmodel.EffectIntent, error)
 	GetEffectIntentByKey(context.Context, string) (harnessmodel.EffectIntent, error)
 	ListUncertainEffects(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.EffectIntent, error)
+	ListEffectIntentsByAttempt(context.Context, harnessmodel.AttemptID, int) ([]harnessmodel.EffectIntent, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -68,7 +69,7 @@ type Tx interface {
 	Reader
 	CreateWorkflowDefinition(context.Context, harnessmodel.WorkflowDefinition) error
 	CreateWorkflowRun(context.Context, harnessmodel.WorkflowRun) error
-	UpdateWorkflowRunState(context.Context, harnessmodel.WorkflowRunID, harnessmodel.WorkflowState, time.Time) error // compatibility helper
+	UpdateWorkflowRunState(context.Context, harnessmodel.WorkflowRunID, harnessmodel.WorkflowState, time.Time) error
 	CompareAndSwapWorkflowRun(context.Context, harnessmodel.WorkflowState, harnessmodel.WorkflowRun) error
 	CreateGraphRevision(context.Context, harnessmodel.GraphRevision) error
 	CreateWorkflowProgress(context.Context, harnessmodel.WorkflowProgress) error
