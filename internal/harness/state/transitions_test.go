@@ -26,6 +26,7 @@ func TestTerminalWorkflowCannotReopen(t *testing.T) {
 				t.Errorf("terminal workflow %s reopened to %s", from, to)
 			}
 		}
+	}
 }
 
 func TestRepresentativeAllowedTransitions(t *testing.T) {
