@@ -30,7 +30,12 @@ WHERE not_before IS NOT NULL AND not_before<>'' AND not_before_ns IS NULL`)
 			_ = rows.Close()
 			return fmt.Errorf("parse ready deadline for %s: %w", id, err)
 		}
-		items = append(items, item{id: id, ns: at.UnixNano()})
+		ns, err := checkedUnixNano(at)
+		if err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("ready deadline for %s is not representable durably: %w", id, err)
+		}
+		items = append(items, item{id: id, ns: ns})
 	}
 	if err := rows.Err(); err != nil {
 		_ = rows.Close()
