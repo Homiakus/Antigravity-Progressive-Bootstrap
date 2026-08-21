@@ -10,6 +10,8 @@ import (
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
+const maxSQLiteIntegerRevision = uint64(1<<63 - 1)
+
 func (t *transaction) CreateRetrySchedule(ctx context.Context, schedule harnessmodel.RetrySchedule) error {
 	if schedule.NodeRunID == "" || schedule.WorkflowRunID == "" || schedule.FailedAttemptID == "" || schedule.AttemptNumber < 1 || !schedule.FailureClass.Valid() || schedule.ScheduledAt.IsZero() || schedule.NotBefore.IsZero() || schedule.NotBefore.Before(schedule.ScheduledAt) {
 		return fmt.Errorf("invalid retry schedule")
@@ -264,7 +266,7 @@ ON CONFLICT(service_key) DO NOTHING`,
 }
 
 func (t *transaction) CompareAndSwapCircuitBreaker(ctx context.Context, expectedRevision uint64, breaker harnessmodel.CircuitBreaker) error {
-	if expectedRevision == 0 || breaker.Revision != expectedRevision+1 {
+	if expectedRevision == 0 || expectedRevision >= maxSQLiteIntegerRevision || breaker.Revision != expectedRevision+1 {
 		return fmt.Errorf("invalid circuit breaker revision transition %d -> %d", expectedRevision, breaker.Revision)
 	}
 	if err := validateCircuit(breaker); err != nil {
@@ -287,7 +289,7 @@ WHERE service_key=? AND revision=?`,
 }
 
 func validateCircuit(breaker harnessmodel.CircuitBreaker) error {
-	if breaker.ServiceKey == "" || breaker.Revision == 0 || breaker.FailureThreshold < 1 || breaker.ConsecutiveFailures < 0 || breaker.UpdatedAt.IsZero() {
+	if breaker.ServiceKey == "" || breaker.Revision == 0 || breaker.Revision > maxSQLiteIntegerRevision || breaker.FailureThreshold < 1 || breaker.ConsecutiveFailures < 0 || breaker.UpdatedAt.IsZero() {
 		return fmt.Errorf("invalid circuit breaker")
 	}
 	switch breaker.State {
