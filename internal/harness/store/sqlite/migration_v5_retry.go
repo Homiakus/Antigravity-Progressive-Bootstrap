@@ -71,7 +71,8 @@ CREATE TABLE retry_budgets (
     used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
     updated_at TEXT NOT NULL,
     PRIMARY KEY(scope, scope_key),
-    CHECK(used_count <= limit_count)
+    CHECK(used_count <= limit_count),
+    CHECK(window_start_ns <= 9223372036854775807 - window_ns)
 );
 
 CREATE INDEX retry_budgets_window
@@ -79,7 +80,7 @@ CREATE INDEX retry_budgets_window
 
 CREATE TABLE circuit_breakers (
     service_key TEXT PRIMARY KEY,
-    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0 AND revision <= 9223372036854775807),
     state TEXT NOT NULL,
     consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0),
     failure_threshold INTEGER NOT NULL CHECK(failure_threshold > 0),
