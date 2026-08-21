@@ -16,6 +16,8 @@ import (
 	"github.com/homiakus/agctl/internal/tasks"
 )
 
+const harnessUsage = "usage: agctl harness migrate [--dry-run] | status | explain --node-run ID | pause --run ID | resume --run ID | cancel --run ID | signal --run ID --name NAME --message-id ID [--payload DATA] | approvals --run ID [--limit N] | approve --id ID --actor ACTOR | reject --id ID --actor ACTOR | sweep [--limit N]"
+
 // init is a temporary strangler entrypoint for the Harness migration line.
 // It intercepts only `agctl harness ...`; every legacy 3.2 command continues
 // through main.go unchanged. Replace this shim with the normal command registry
@@ -61,11 +63,18 @@ type harnessStatus struct {
 	DurableNodeRuns    int    `json:"durableNodeRuns"`
 	DurableReadyNodes  int    `json:"durableReadyNodes"`
 	DurableEvents      int    `json:"durableEvents"`
+	PendingTimers      int    `json:"pendingTimers"`
+	PendingSignals     int    `json:"pendingSignals"`
+	WaitingSignals     int    `json:"waitingSignals"`
+	PendingApprovals   int    `json:"pendingApprovals"`
+	ActiveRetries      int    `json:"activeRetries"`
+	PausedRuns         int    `json:"pausedRuns"`
+	PausingRuns        int    `json:"pausingRuns"`
 }
 
 func runHarness(p paths.Paths, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status | explain --node-run ID")
+		return fmt.Errorf(harnessUsage)
 	}
 	switch args[0] {
 	case "migrate":
@@ -87,8 +96,70 @@ func runHarness(p paths.Paths, args []string) error {
 			return fmt.Errorf("--node-run is required")
 		}
 		return runHarnessExplain(p, harnessmodel.NodeRunID(*nodeRunID))
+	case "pause", "resume", "cancel":
+		fs := flag.NewFlagSet("harness "+args[0], flag.ContinueOnError)
+		runID := fs.String("run", "", "workflow run id")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *runID == "" {
+			return fmt.Errorf("--run is required")
+		}
+		switch args[0] {
+		case "pause":
+			return runHarnessPause(p, harnessmodel.WorkflowRunID(*runID))
+		case "resume":
+			return runHarnessResume(p, harnessmodel.WorkflowRunID(*runID))
+		default:
+			return runHarnessCancel(p, harnessmodel.WorkflowRunID(*runID))
+		}
+	case "signal":
+		fs := flag.NewFlagSet("harness signal", flag.ContinueOnError)
+		runID := fs.String("run", "", "workflow run id")
+		name := fs.String("name", "", "signal name")
+		messageID := fs.String("message-id", "", "producer idempotency key")
+		payload := fs.String("payload", "", "signal payload")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *runID == "" || *name == "" || *messageID == "" {
+			return fmt.Errorf("--run, --name and --message-id are required")
+		}
+		return runHarnessSignal(p, harnessmodel.WorkflowRunID(*runID), *name, *messageID, *payload)
+	case "approvals":
+		fs := flag.NewFlagSet("harness approvals", flag.ContinueOnError)
+		runID := fs.String("run", "", "workflow run id")
+		limit := fs.Int("limit", 100, "maximum pending approvals")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *runID == "" {
+			return fmt.Errorf("--run is required")
+		}
+		if *limit <= 0 {
+			return fmt.Errorf("--limit must be positive")
+		}
+		return runHarnessApprovals(p, harnessmodel.WorkflowRunID(*runID), *limit)
+	case "approve", "reject":
+		fs := flag.NewFlagSet("harness "+args[0], flag.ContinueOnError)
+		approvalID := fs.String("id", "", "approval id")
+		actor := fs.String("actor", "", "human/operator identity")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *approvalID == "" || *actor == "" {
+			return fmt.Errorf("--id and --actor are required")
+		}
+		return runHarnessApprovalDecision(p, harnessmodel.ApprovalID(*approvalID), *actor, args[0] == "approve")
+	case "sweep":
+		fs := flag.NewFlagSet("harness sweep", flag.ContinueOnError)
+		limit := fs.Int("limit", 1000, "maximum due items per durable wait class")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		return runHarnessSweep(p, *limit)
 	default:
-		return fmt.Errorf("usage: agctl harness migrate [--dry-run] | status | explain --node-run ID")
+		return fmt.Errorf(harnessUsage)
 	}
 }
 
@@ -165,6 +236,13 @@ func runHarnessStatus(p paths.Paths) error {
 		{"SELECT COUNT(*) FROM node_runs", &status.DurableNodeRuns},
 		{"SELECT COUNT(*) FROM ready_queue", &status.DurableReadyNodes},
 		{"SELECT COUNT(*) FROM events", &status.DurableEvents},
+		{"SELECT COUNT(*) FROM timers WHERE state='PENDING'", &status.PendingTimers},
+		{"SELECT COUNT(*) FROM signals WHERE state='PENDING'", &status.PendingSignals},
+		{"SELECT COUNT(*) FROM signal_waits WHERE state='WAITING'", &status.WaitingSignals},
+		{"SELECT COUNT(*) FROM approvals WHERE state='PENDING'", &status.PendingApprovals},
+		{"SELECT COUNT(*) FROM retry_schedule", &status.ActiveRetries},
+		{"SELECT COUNT(*) FROM workflow_runs WHERE state='PAUSED'", &status.PausedRuns},
+		{"SELECT COUNT(*) FROM workflow_runs WHERE state='PAUSING'", &status.PausingRuns},
 	}
 	for _, q := range queries {
 		if err := db.SQLDB().QueryRow(q.query).Scan(q.out); err != nil {
