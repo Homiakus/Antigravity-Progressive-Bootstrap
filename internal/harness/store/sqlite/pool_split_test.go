@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,20 +9,21 @@ import (
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
-func TestWriterDSNUsesImmediateTransactions(t *testing.T) {
-	dsn := buildWriterDSN(filepath.Join(t.TempDir(), "state.db"), Options{})
-	u, err := url.Parse(dsn)
+func TestWriterPoolIsSingleConnectionAndReaderPoolIsIndependent(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), "state.db"), Options{MaxOpenConns: 6, MaxIdleConns: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := u.Query().Get("_txlock"); got != "immediate" {
-		t.Fatalf("writer tx lock=%q want immediate", got)
+	defer db.Close()
+	if got := db.SQLDB().Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("writer pool max connections=%d want=1", got)
 	}
-	if got := buildDSN(filepath.Join(t.TempDir(), "reader.db"), Options{}); func() string {
-		u, _ := url.Parse(got)
-		return u.Query().Get("_txlock")
-	}() != "" {
-		t.Fatal("reader DSN unexpectedly requests writer lock")
+	if db.readDB == nil {
+		t.Fatal("reader pool is nil")
+	}
+	if got := db.readDB.Stats().MaxOpenConnections; got != 6 {
+		t.Fatalf("reader pool max connections=%d want=6", got)
 	}
 }
 
