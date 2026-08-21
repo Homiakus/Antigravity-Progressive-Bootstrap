@@ -2,9 +2,15 @@ package retry
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
+)
+
+var (
+	minDurableUnixNanoTime = time.Unix(0, math.MinInt64).UTC()
+	maxDurableUnixNanoTime = time.Unix(0, math.MaxInt64).UTC()
 )
 
 type Decision struct {
@@ -32,6 +38,10 @@ func Decide(in DecisionInput) (Decision, error) {
 	}
 	if in.Now.IsZero() {
 		return Decision{}, fmt.Errorf("decision time is required")
+	}
+	in.Now = in.Now.UTC()
+	if !durableUnixNanoTime(in.Now) {
+		return Decision{}, fmt.Errorf("decision time is outside durable Unix-nanosecond range")
 	}
 	if in.Policy.MaxAttempts < 1 {
 		return Decision{}, fmt.Errorf("retry policy maxAttempts must be >= 1")
@@ -61,7 +71,20 @@ func Decide(in DecisionInput) (Decision, error) {
 	if in.Failure.RetryAfter > delay {
 		delay = in.Failure.RetryAfter
 	}
-	notBefore := in.Now.Add(delay)
+	notBefore := in.Now.Add(delay).UTC()
+	// Durable scheduler indexes use signed int64 Unix nanoseconds. time.Duration
+	// can represent almost 292 years, which is enough to push a current timestamp
+	// beyond the UnixNano ceiling (2262-04-11) and wrap the persisted deadline.
+	// Clamp the retry deadline to the largest representable durable timestamp;
+	// this preserves monotonic ordering and never turns a huge backoff into an
+	// immediately-due retry.
+	if notBefore.After(maxDurableUnixNanoTime) {
+		notBefore = maxDurableUnixNanoTime
+		delay = notBefore.Sub(in.Now)
+	}
+	if !durableUnixNanoTime(notBefore) || notBefore.Before(in.Now) {
+		return Decision{}, fmt.Errorf("retry deadline is outside durable Unix-nanosecond range")
+	}
 	if in.Policy.MaxElapsedTime > 0 && !in.FirstAttemptAt.IsZero() {
 		deadline := in.FirstAttemptAt.Add(in.Policy.MaxElapsedTime)
 		if !in.Now.Before(deadline) {
@@ -71,7 +94,12 @@ func Decide(in DecisionInput) (Decision, error) {
 			return Decision{Reason: "next retry would exceed max elapsed time"}, nil
 		}
 	}
-	return Decision{Retry: true, Delay: delay, NotBefore: notBefore.UTC(), Reason: "retry permitted"}, nil
+	return Decision{Retry: true, Delay: delay, NotBefore: notBefore, Reason: "retry permitted"}, nil
+}
+
+func durableUnixNanoTime(value time.Time) bool {
+	value = value.UTC()
+	return !value.Before(minDurableUnixNanoTime) && !value.After(maxDurableUnixNanoTime)
 }
 
 func hardNonRetryable(class harnessmodel.ErrorClass) bool {
