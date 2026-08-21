@@ -160,3 +160,43 @@ func TestBackoffCannotOverflowDuration(t *testing.T) {
 		t.Fatalf("overflow produced non-positive duration: %s", got)
 	}
 }
+
+func TestDecisionClampsHugeBackoffToDurableUnixNanoCeiling(t *testing.T) {
+	now := time.Date(2026, time.August, 21, 0, 0, 0, 0, time.UTC)
+	p := basePolicy()
+	p.MaxAttempts = 101
+	p.InitialDelay = time.Hour
+	p.MaxDelay = 0
+	p.BackoffFactor = 10
+	p.Jitter = 0
+	decision, err := Decide(DecisionInput{
+		Policy: p,
+		Failure: harnessmodel.Failure{Class: harnessmodel.ErrorInfraTransient},
+		AttemptNumber: 100,
+		Now: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decision.Retry {
+		t.Fatalf("huge but valid backoff unexpectedly became terminal: %+v", decision)
+	}
+	if !decision.NotBefore.Equal(maxDurableUnixNanoTime) {
+		t.Fatalf("deadline=%s want durable ceiling %s", decision.NotBefore, maxDurableUnixNanoTime)
+	}
+	if decision.Delay <= 0 || decision.NotBefore.UnixNano() <= now.UnixNano() {
+		t.Fatalf("clamped deadline is not monotonic: %+v", decision)
+	}
+}
+
+func TestDecisionRejectsClockOutsideDurableUnixNanoRange(t *testing.T) {
+	_, err := Decide(DecisionInput{
+		Policy: basePolicy(),
+		Failure: harnessmodel.Failure{Class: harnessmodel.ErrorInfraTransient},
+		AttemptNumber: 1,
+		Now: maxDurableUnixNanoTime.Add(time.Nanosecond),
+	})
+	if err == nil || !strings.Contains(err.Error(), "Unix-nanosecond") {
+		t.Fatalf("outside-range clock error=%v", err)
+	}
+}
