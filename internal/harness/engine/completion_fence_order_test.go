@@ -8,6 +8,7 @@ import (
 
 	harnesslease "github.com/homiakus/agctl/internal/harness/lease"
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
+	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
 func TestReclaimedClaimedAttemptRejectsOldFenceAcrossCompletionAPIs(t *testing.T) {
@@ -48,7 +49,14 @@ func TestReclaimedClaimedAttemptRejectsOldFenceAcrossCompletionAPIs(t *testing.T
 		t.Fatalf("stale retry completion error=%v want ErrStaleFence", err)
 	}
 
-	persisted := attemptRunFor(t, db, claim.Attempt.ID)
+	var persisted harnessmodel.Attempt
+	if err := db.View(ctx, func(reader harnessstore.Reader) error {
+		var err error
+		persisted, err = reader.GetAttempt(ctx, claim.Attempt.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if persisted.State != harnessmodel.AttemptClaimed || persisted.WorkerID != "worker-new-fence" || persisted.LeaseEpoch != newLease.Epoch {
 		t.Fatalf("stale completion mutated reclaimed attempt: %+v", persisted)
 	}
