@@ -14,11 +14,22 @@ func (t *transaction) CreateRetrySchedule(ctx context.Context, schedule harnessm
 	if schedule.NodeRunID == "" || schedule.WorkflowRunID == "" || schedule.FailedAttemptID == "" || schedule.AttemptNumber < 1 || !schedule.FailureClass.Valid() || schedule.ScheduledAt.IsZero() || schedule.NotBefore.IsZero() || schedule.NotBefore.Before(schedule.ScheduledAt) {
 		return fmt.Errorf("invalid retry schedule")
 	}
-	_, err := t.tx.ExecContext(ctx, `
+	scheduledNS, err := checkedUnixNano(schedule.ScheduledAt)
+	if err != nil {
+		return fmt.Errorf("invalid retry scheduled time: %w", err)
+	}
+	notBeforeNS, err := checkedUnixNano(schedule.NotBefore)
+	if err != nil {
+		return fmt.Errorf("invalid retry deadline: %w", err)
+	}
+	if notBeforeNS < scheduledNS {
+		return fmt.Errorf("retry deadline precedes scheduled time")
+	}
+	_, err = t.tx.ExecContext(ctx, `
 INSERT INTO retry_schedule(node_run_id, workflow_run_id, failed_attempt_id, attempt_number, failure_class, policy_ref, service_key, scheduled_at, not_before, not_before_ns)
 VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(schedule.NodeRunID), string(schedule.WorkflowRunID), string(schedule.FailedAttemptID), schedule.AttemptNumber,
-		string(schedule.FailureClass), schedule.PolicyRef, schedule.ServiceKey, formatTime(schedule.ScheduledAt), formatTime(schedule.NotBefore), schedule.NotBefore.UnixNano())
+		string(schedule.FailureClass), schedule.PolicyRef, schedule.ServiceKey, formatTime(schedule.ScheduledAt), formatTime(schedule.NotBefore), notBeforeNS)
 	if err != nil {
 		return fmt.Errorf("insert retry schedule: %w", err)
 	}
@@ -32,8 +43,9 @@ FROM retry_schedule WHERE node_run_id=?`, string(nodeRunID)))
 }
 
 func (t *transaction) ListDueRetries(ctx context.Context, now time.Time, limit int) ([]harnessmodel.RetrySchedule, error) {
-	if now.IsZero() {
-		return nil, fmt.Errorf("retry due time is required")
+	nowNS, err := checkedUnixNano(now)
+	if err != nil {
+		return nil, fmt.Errorf("invalid retry due time: %w", err)
 	}
 	if limit <= 0 || limit > 10000 {
 		limit = 1000
@@ -43,7 +55,7 @@ SELECT node_run_id, workflow_run_id, failed_attempt_id, attempt_number, failure_
 FROM retry_schedule
 WHERE not_before_ns<=?
 ORDER BY not_before_ns, workflow_run_id, node_run_id
-LIMIT ?`, now.UnixNano(), limit)
+LIMIT ?`, nowNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list due retries: %w", err)
 	}
@@ -109,7 +121,11 @@ FROM retry_budgets WHERE scope=? AND scope_key=?`, string(scope), scopeKey).
 	if budget.WindowStart, err = parseTime(windowStart); err != nil {
 		return harnessmodel.RetryBudget{}, fmt.Errorf("parse retry budget window_start: %w", err)
 	}
-	if budget.WindowStart.UnixNano() != windowStartNS {
+	checkedStartNS, err := checkedUnixNanoWindow(budget.WindowStart, budget.Window)
+	if err != nil {
+		return harnessmodel.RetryBudget{}, fmt.Errorf("retry budget %s/%s has invalid durable window: %w", scope, scopeKey, err)
+	}
+	if checkedStartNS != windowStartNS {
 		return harnessmodel.RetryBudget{}, fmt.Errorf("retry budget %s/%s has inconsistent window timestamp", scope, scopeKey)
 	}
 	if budget.UpdatedAt, err = parseTime(updatedAt); err != nil {
@@ -128,12 +144,15 @@ func (t *transaction) ReserveRetryBudget(ctx context.Context, scope harnessmodel
 		return harnessmodel.RetryBudget{}, false, fmt.Errorf("invalid retry budget reservation")
 	}
 	now = now.UTC()
-	nowNS := now.UnixNano()
+	nowNS, err := checkedUnixNanoWindow(now, window)
+	if err != nil {
+		return harnessmodel.RetryBudget{}, false, fmt.Errorf("retry budget window is outside durable range: %w", err)
+	}
 	windowNS := int64(window)
 	var budget harnessmodel.RetryBudget
 	var scopeValue, windowStart, updatedAt string
 	var storedWindowStartNS, storedWindowNS int64
-	err := t.tx.QueryRowContext(ctx, `
+	err = t.tx.QueryRowContext(ctx, `
 INSERT INTO retry_budgets(
     scope, scope_key, window_start, window_start_ns, window_ns,
     limit_count, used_count, updated_at
@@ -166,7 +185,11 @@ RETURNING scope, scope_key, window_start, window_start_ns, window_ns, limit_coun
 		if budget.WindowStart, parseErr = parseTime(windowStart); parseErr != nil {
 			return harnessmodel.RetryBudget{}, false, fmt.Errorf("parse reserved retry budget window_start: %w", parseErr)
 		}
-		if budget.WindowStart.UnixNano() != storedWindowStartNS {
+		checkedStartNS, checkErr := checkedUnixNanoWindow(budget.WindowStart, budget.Window)
+		if checkErr != nil {
+			return harnessmodel.RetryBudget{}, false, fmt.Errorf("reserved retry budget has invalid durable window: %w", checkErr)
+		}
+		if checkedStartNS != storedWindowStartNS {
 			return harnessmodel.RetryBudget{}, false, fmt.Errorf("reserved retry budget has inconsistent window timestamp")
 		}
 		if budget.UpdatedAt, parseErr = parseTime(updatedAt); parseErr != nil {
