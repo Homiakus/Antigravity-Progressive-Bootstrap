@@ -13,7 +13,7 @@ var currentHarnessTables = []string{
 	"nodes", "dependencies", "node_runs", "attempts", "events", "outbox",
 	"workflow_progress", "ready_queue", "workflow_schedule_state", "workers", "leases",
 	"retry_schedule", "retry_schedule_history", "retry_budgets", "circuit_breakers",
-	"timers", "signals", "signal_waits", "approvals",
+	"timers", "signals", "signal_waits", "approvals", "effect_intents", "effect_attempt_bindings",
 }
 
 func assertCurrentSchema(t *testing.T, ctx context.Context, db *DB) {
@@ -129,7 +129,7 @@ func openFixtureAtVersion(t *testing.T, path string, version int) {
 }
 
 func TestUpgradeFromHistoricalFixtures(t *testing.T) {
-	for _, fromVersion := range []int{0, 1, 2, 3, 4, 5} {
+	for _, fromVersion := range []int{0, 1, 2, 3, 4, 5, 6} {
 		t.Run("v"+string(rune('0'+fromVersion)), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "state.db")
@@ -191,6 +191,23 @@ func TestVersionFiveToSixCreatesDurableWaitConstraints(t *testing.T) {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v6 index %s: %v", name, err)
+		}
+	}
+}
+
+func TestVersionSixToSevenCreatesEffectConstraints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	openFixtureAtVersion(t, path, 6)
+	db, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"effect_intents_by_node", "effect_intents_uncertain", "effect_intents_by_workflow_state", "effect_attempt_bindings_by_attempt"} {
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
+			t.Fatalf("missing v7 index %s: %v", name, err)
 		}
 	}
 }
