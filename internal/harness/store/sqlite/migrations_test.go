@@ -13,6 +13,7 @@ var currentHarnessTables = []string{
 	"nodes", "dependencies", "node_runs", "attempts", "events", "outbox",
 	"workflow_progress", "ready_queue", "workflow_schedule_state", "workers", "leases",
 	"retry_schedule", "retry_schedule_history", "retry_budgets", "circuit_breakers",
+	"timers", "signals", "signal_waits", "approvals",
 }
 
 func assertCurrentSchema(t *testing.T, ctx context.Context, db *DB) {
@@ -128,7 +129,7 @@ func openFixtureAtVersion(t *testing.T, path string, version int) {
 }
 
 func TestUpgradeFromHistoricalFixtures(t *testing.T) {
-	for _, fromVersion := range []int{0, 1, 2, 3, 4} {
+	for _, fromVersion := range []int{0, 1, 2, 3, 4, 5} {
 		t.Run("v"+string(rune('0'+fromVersion)), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "state.db")
@@ -173,6 +174,23 @@ func TestVersionFourToFiveCreatesRetryRuntimeConstraints(t *testing.T) {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v5 index %s: %v", name, err)
+		}
+	}
+}
+
+func TestVersionFiveToSixCreatesDurableWaitConstraints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	openFixtureAtVersion(t, path, 5)
+	db, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"timers_due", "signals_pending", "signal_waits_pending", "approvals_pending"} {
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
+			t.Fatalf("missing v6 index %s: %v", name, err)
 		}
 	}
 }
