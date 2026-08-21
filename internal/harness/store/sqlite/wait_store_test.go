@@ -16,7 +16,7 @@ func seedWaitNode(t *testing.T, db *DB, now time.Time) harnessmodel.NodeRun {
 	t.Helper()
 	seedRun(t, db, now)
 	node := harnessmodel.NodeRun{
-		ID: "nr_wait", WorkflowRunID: "wfr_test", DefinitionID: "wfd_test", DefinitionVersion: 1,
+		ID: "nr_wait", WorkflowRunID: "wfr_test",
 		NodeID: "a", GraphRevision: 1, Generation: 1, State: harnessmodel.NodeWaiting,
 		RemainingDependencies: 0, CreatedAt: now, UpdatedAt: now,
 	}
