@@ -48,7 +48,7 @@ CREATE TABLE effect_attempt_bindings (
     effect_intent_id TEXT NOT NULL,
     attempt_id TEXT NOT NULL,
     bound_at TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN (
+    state TEXT NOT NULL DEFAULT 'PREPARED' CHECK(state IN (
         'PREPARED','DISPATCHED','CONFIRMED','FAILED','IN_DOUBT','COMPENSATED'
     )),
     dispatched_at TEXT,
@@ -67,6 +67,34 @@ CREATE INDEX effect_attempt_bindings_by_attempt
 CREATE INDEX effect_attempt_bindings_uncertain
     ON effect_attempt_bindings(state, bound_at, effect_intent_id, attempt_id)
     WHERE state IN ('DISPATCHED','IN_DOUBT');
+
+CREATE TRIGGER effect_attempt_binding_initialize
+AFTER INSERT ON effect_attempt_bindings
+BEGIN
+    UPDATE effect_attempt_bindings
+    SET state=(SELECT state FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        dispatched_at=(SELECT dispatched_at FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        resolved_at=(SELECT resolved_at FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        provider_ref=(SELECT provider_ref FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        result_digest=(SELECT result_digest FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        error_class=(SELECT error_class FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id),
+        error_message=(SELECT error_message FROM effect_intents WHERE effect_intent_id=NEW.effect_intent_id)
+    WHERE effect_intent_id=NEW.effect_intent_id AND attempt_id=NEW.attempt_id;
+END;
+
+CREATE TRIGGER effect_attempt_binding_follow_latest
+AFTER UPDATE OF state, dispatched_at, resolved_at, provider_ref, result_digest, error_class, error_message ON effect_intents
+BEGIN
+    UPDATE effect_attempt_bindings
+    SET state=NEW.state,
+        dispatched_at=NEW.dispatched_at,
+        resolved_at=NEW.resolved_at,
+        provider_ref=NEW.provider_ref,
+        result_digest=NEW.result_digest,
+        error_class=NEW.error_class,
+        error_message=NEW.error_message
+    WHERE effect_intent_id=NEW.effect_intent_id AND attempt_id=NEW.last_attempt_id;
+END;
 `,
 	})
 }
