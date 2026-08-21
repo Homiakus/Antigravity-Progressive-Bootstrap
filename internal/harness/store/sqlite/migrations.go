@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 7
 
 type migration struct {
 	Version int
@@ -285,7 +285,7 @@ func applyMigration(ctx context.Context, db *sql.DB, m migration) error {
 		return fmt.Errorf("record migration %d: %w", m.Version, err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration %d: %w", m.Version, err)
+		return fmt.Errorf("commit migration %d: %w", err)
 	}
 	return nil
 }
