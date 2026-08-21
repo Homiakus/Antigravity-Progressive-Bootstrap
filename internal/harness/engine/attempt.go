@@ -12,11 +12,11 @@ import (
 )
 
 type CompletionResult struct {
-	Attempt         harnessmodel.Attempt      `json:"attempt"`
-	NodeRun         harnessmodel.NodeRun      `json:"nodeRun"`
-	WorkflowRun     harnessmodel.WorkflowRun  `json:"workflowRun"`
+	Attempt         harnessmodel.Attempt     `json:"attempt"`
+	NodeRun         harnessmodel.NodeRun     `json:"nodeRun"`
+	WorkflowRun     harnessmodel.WorkflowRun `json:"workflowRun"`
 	ReadyNodeRunIDs []harnessmodel.NodeRunID `json:"readyNodeRunIds,omitempty"`
-	Idempotent      bool                      `json:"idempotent,omitempty"`
+	Idempotent      bool                     `json:"idempotent,omitempty"`
 }
 
 type completionFence struct {
@@ -164,7 +164,7 @@ func (e *Engine) completeAttemptSuccess(ctx context.Context, attemptID harnessmo
 		}
 
 		readyIDs := make([]harnessmodel.NodeRunID, 0)
-		if run.State == harnessmodel.WorkflowRunning {
+		if workflowAllowsDrain(run.State) {
 			dependents, err := tx.ListDependentNodeRuns(ctx, run.ID, nr.NodeID)
 			if err != nil {
 				return err
@@ -191,11 +191,15 @@ func (e *Engine) completeAttemptSuccess(ctx context.Context, attemptID harnessmo
 			}
 		}
 
-		if progress.TerminalNodes == progress.TotalNodes && progress.FailedNodes == 0 && run.State == harnessmodel.WorkflowRunning {
+		if progress.TerminalNodes == progress.TotalNodes && progress.FailedNodes == 0 && workflowAllowsDrain(run.State) {
 			if err := transitionWorkflow(ctx, tx, &run, harnessmodel.WorkflowSucceeded, now); err != nil {
 				return err
 			}
 			if _, err := e.appendEvent(ctx, tx, run.ID, now, "WorkflowSucceeded", "workflow_run", string(run.ID), map[string]any{"terminalNodes": progress.TerminalNodes, "totalNodes": progress.TotalNodes}); err != nil {
+				return err
+			}
+		} else if run.State == harnessmodel.WorkflowPausing {
+			if _, err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil {
 				return err
 			}
 		}
@@ -281,7 +285,7 @@ func (e *Engine) completeAttemptFailure(ctx context.Context, attemptID harnessmo
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeFailed", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "errorClass": errorClass}); err != nil {
 			return err
 		}
-		if run.State == harnessmodel.WorkflowRunning {
+		if workflowAllowsDrain(run.State) {
 			if err := transitionWorkflow(ctx, tx, &run, harnessmodel.WorkflowFailed, now); err != nil {
 				return err
 			}
