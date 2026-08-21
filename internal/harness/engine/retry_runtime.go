@@ -70,8 +70,8 @@ func (e *Engine) completeAttemptFailureWithRetry(ctx context.Context, attemptID 
 	}
 	return RetryFailureResult{
 		Completion: terminal,
-		Decision: harnessretry.Decision{Retry: false, Reason: reason},
-		Terminal: true, BudgetDenied: budgetDenied,
+		Decision:   harnessretry.Decision{Retry: false, Reason: reason},
+		Terminal:   true, BudgetDenied: budgetDenied,
 	}, nil
 }
 
@@ -113,7 +113,7 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 			result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run, Idempotent: true}
 			result.Decision = harnessretry.Decision{
 				Retry: true, NotBefore: schedule.NotBefore,
-				Delay: schedule.NotBefore.Sub(schedule.ScheduledAt),
+				Delay:  schedule.NotBefore.Sub(schedule.ScheduledAt),
 				Reason: "retry decision recovered from durable history",
 			}
 			result.RetrySchedule = &schedule
@@ -136,7 +136,7 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 		if err != nil {
 			return err
 		}
-		if run.State != harnessmodel.WorkflowRunning {
+		if !workflowAllowsDrain(run.State) {
 			return errRetryTerminal
 		}
 		def, err := tx.GetWorkflowDefinition(ctx, run.DefinitionID, run.DefinitionVersion)
@@ -223,6 +223,11 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 		}); err != nil {
 			return err
 		}
+		if run.State == harnessmodel.WorkflowPausing {
+			if _, err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil {
+				return err
+			}
+		}
 		result.Completion = CompletionResult{Attempt: attempt, NodeRun: nr, WorkflowRun: run}
 		result.Decision = decision
 		result.RetrySchedule = &schedule
@@ -275,6 +280,8 @@ func (e *Engine) ReleaseDueRetries(ctx context.Context, limit int) ([]harnessmod
 			if err != nil {
 				return err
 			}
+			// A due retry remains durable while PAUSING/PAUSED. Resume reopens
+			// the workflow gate and a later release call moves it back to READY.
 			if run.State != harnessmodel.WorkflowRunning {
 				return nil
 			}
