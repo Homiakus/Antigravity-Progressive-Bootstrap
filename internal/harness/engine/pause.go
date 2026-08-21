@@ -3,15 +3,16 @@ package engine
 import (
 	"context"
 	"fmt"
+	"time"
 
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
 type PauseResult struct {
-	WorkflowRun   harnessmodel.WorkflowRun `json:"workflowRun"`
-	ActiveAttempts int                     `json:"activeAttempts"`
-	Idempotent    bool                     `json:"idempotent,omitempty"`
+	WorkflowRun    harnessmodel.WorkflowRun `json:"workflowRun"`
+	ActiveAttempts int                      `json:"activeAttempts"`
+	Idempotent     bool                     `json:"idempotent,omitempty"`
 }
 
 // PauseWorkflow atomically closes the scheduling gate for a running workflow.
@@ -51,11 +52,8 @@ func (e *Engine) PauseWorkflow(ctx context.Context, runID harnessmodel.WorkflowR
 			return err
 		}
 		result.ActiveAttempts = active
-		if active == 0 && run.State == harnessmodel.WorkflowPausing {
-			if err := transitionWorkflow(ctx, tx, &run, harnessmodel.WorkflowPaused, now); err != nil {
-				return err
-			}
-			if _, err := e.appendEvent(ctx, tx, run.ID, now, "WorkflowPaused", "workflow_run", string(run.ID), map[string]any{"activeAttempts": 0}); err != nil {
+		if active == 0 {
+			if _, err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil {
 				return err
 			}
 		}
@@ -109,6 +107,22 @@ func workflowAllowsDrain(state harnessmodel.WorkflowState) bool {
 // Attempt from the active CLAIMED/RUNNING set. It makes PAUSING -> PAUSED a
 // durable consequence of the last active Attempt finishing rather than a
 // polling side effect.
-func (e *Engine) finalizePauseIfDrained(ctx context.Context, tx harnessstore.Tx, run *harnessmodel.WorkflowRun, atTime interface{ UTC() interface{} }) error {
-	return nil
+func (e *Engine) finalizePauseIfDrained(ctx context.Context, tx harnessstore.Tx, run *harnessmodel.WorkflowRun, at time.Time) (bool, error) {
+	if run.State != harnessmodel.WorkflowPausing {
+		return false, nil
+	}
+	active, err := tx.CountActiveAttempts(ctx, run.ID)
+	if err != nil {
+		return false, err
+	}
+	if active != 0 {
+		return false, nil
+	}
+	if err := transitionWorkflow(ctx, tx, run, harnessmodel.WorkflowPaused, at); err != nil {
+		return false, err
+	}
+	if _, err := e.appendEvent(ctx, tx, run.ID, at, "WorkflowPaused", "workflow_run", string(run.ID), map[string]any{"activeAttempts": 0}); err != nil {
+		return false, err
+	}
+	return true, nil
 }
