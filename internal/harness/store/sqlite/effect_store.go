@@ -83,7 +83,8 @@ ON CONFLICT(idempotency_key) DO NOTHING`,
 			return harnessmodel.EffectIntent{}, false, err
 		}
 	}
-	return t.GetEffectIntent(ctx, existing.ID)
+	updated, err := t.GetEffectIntent(ctx, existing.ID)
+	return updated, false, err
 }
 
 func validateNewEffectIntent(intent harnessmodel.EffectIntent) error {
