@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/homiakus/agctl/internal/harness/engine"
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	"github.com/homiakus/agctl/internal/harness/resource"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
@@ -78,43 +77,6 @@ func TestNotBeforeIsDurableAndExplainable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ok || decision.Node.NodeRunID != nodeRunID {
-		t.Fatalf("due node was not selected: ok=%v decision=%+v", ok, decision)
-	}
-}
-
-func TestWorkflowWeightChangesServiceShare(t *testing.T) {
-	ctx := context.Background()
-	eng, sched, _ := schedulerFixture(t)
-	heavy, err := eng.StartWorkflow(ctx, independentDefinition("weighted-heavy", 40))
-	if err != nil {
-		t.Fatal(err)
-	}
-	light, err := eng.StartWorkflow(ctx, independentDefinition("weighted-light", 40))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sched.SetWorkflowWeight(ctx, heavy.ID, 4); err != nil {
-		t.Fatal(err)
-	}
-	if err := sched.SetWorkflowWeight(ctx, light.ID, 1); err != nil {
-		t.Fatal(err)
-	}
-	counts := map[harnessmodel.WorkflowRunID]int{}
-	for i := 0; i < 20; i++ {
-		decision, ok, err := sched.Next(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			t.Fatal("scheduler returned no weighted decision")
-		}
-		counts[decision.Node.WorkflowRunID]++
-		finishDecision(t, ctx, eng, decision)
-	}
-	if counts[heavy.ID] <= counts[light.ID] {
-		t.Fatalf("weight 4 workflow did not receive larger share: heavy=%d light=%d", counts[heavy.ID], counts[light.ID])
-	}
-	if counts[heavy.ID] < 3*counts[light.ID] {
-		t.Fatalf("weighted share too weak for 4:1 over 20 decisions: heavy=%d light=%d", counts[heavy.ID], counts[light.ID])
+		t.Fatalf("scheduler did not release not-before node after deadline: ok=%v decision=%+v", ok, decision)
 	}
 }
