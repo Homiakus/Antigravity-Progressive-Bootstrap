@@ -38,6 +38,14 @@ type Reader interface {
 	ListDueRetries(context.Context, time.Time, int) ([]harnessmodel.RetrySchedule, error)
 	GetRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string) (harnessmodel.RetryBudget, error)
 	GetCircuitBreaker(context.Context, string) (harnessmodel.CircuitBreaker, error)
+	GetTimer(context.Context, harnessmodel.TimerID) (harnessmodel.Timer, error)
+	ListDueTimers(context.Context, time.Time, int) ([]harnessmodel.Timer, error)
+	GetSignal(context.Context, harnessmodel.SignalID) (harnessmodel.Signal, error)
+	GetSignalByMessage(context.Context, harnessmodel.WorkflowRunID, string, string) (harnessmodel.Signal, error)
+	ListPendingSignals(context.Context, harnessmodel.WorkflowRunID, string, int) ([]harnessmodel.Signal, error)
+	GetSignalWait(context.Context, harnessmodel.NodeRunID) (harnessmodel.SignalWait, error)
+	GetApproval(context.Context, harnessmodel.ApprovalID) (harnessmodel.Approval, error)
+	ListPendingApprovals(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.Approval, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -71,5 +79,13 @@ type Tx interface {
 	ReserveRetryBudget(context.Context, harnessmodel.RetryBudgetScope, string, time.Duration, int, time.Time) (harnessmodel.RetryBudget, bool, error)
 	CreateCircuitBreaker(context.Context, harnessmodel.CircuitBreaker) error
 	CompareAndSwapCircuitBreaker(context.Context, uint64, harnessmodel.CircuitBreaker) error
+	CreateTimer(context.Context, harnessmodel.Timer) error
+	CompareAndSwapTimer(context.Context, harnessmodel.TimerState, harnessmodel.Timer) error
+	PutSignal(context.Context, harnessmodel.Signal) (harnessmodel.Signal, bool, error)
+	CreateSignalWait(context.Context, harnessmodel.SignalWait) error
+	CompareAndSwapSignalWait(context.Context, harnessmodel.SignalWaitState, harnessmodel.SignalWait) error
+	DeliverSignal(context.Context, harnessmodel.NodeRunID, harnessmodel.SignalID, time.Time) error
+	CreateApproval(context.Context, harnessmodel.Approval) error
+	CompareAndSwapApproval(context.Context, harnessmodel.ApprovalState, harnessmodel.Approval) error
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
