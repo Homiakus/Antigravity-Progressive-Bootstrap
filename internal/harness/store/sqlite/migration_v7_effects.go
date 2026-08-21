@@ -48,6 +48,15 @@ CREATE TABLE effect_attempt_bindings (
     effect_intent_id TEXT NOT NULL,
     attempt_id TEXT NOT NULL,
     bound_at TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN (
+        'PREPARED','DISPATCHED','CONFIRMED','FAILED','IN_DOUBT','COMPENSATED'
+    )),
+    dispatched_at TEXT,
+    resolved_at TEXT,
+    provider_ref TEXT NOT NULL DEFAULT '',
+    result_digest TEXT NOT NULL DEFAULT '',
+    error_class TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(effect_intent_id, attempt_id),
     FOREIGN KEY(effect_intent_id) REFERENCES effect_intents(effect_intent_id) ON DELETE CASCADE,
     FOREIGN KEY(attempt_id) REFERENCES attempts(id) ON DELETE RESTRICT
@@ -55,6 +64,9 @@ CREATE TABLE effect_attempt_bindings (
 
 CREATE INDEX effect_attempt_bindings_by_attempt
     ON effect_attempt_bindings(attempt_id, effect_intent_id);
+CREATE INDEX effect_attempt_bindings_uncertain
+    ON effect_attempt_bindings(state, bound_at, effect_intent_id, attempt_id)
+    WHERE state IN ('DISPATCHED','IN_DOUBT');
 `,
 	})
 }
