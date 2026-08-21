@@ -58,6 +58,9 @@ type Reader interface {
 	ListSignalWaits(context.Context, harnessmodel.WorkflowRunID, string, int) ([]harnessmodel.SignalWait, error)
 	GetApproval(context.Context, harnessmodel.ApprovalID) (harnessmodel.Approval, error)
 	ListPendingApprovals(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.Approval, error)
+	GetEffectIntent(context.Context, harnessmodel.EffectIntentID) (harnessmodel.EffectIntent, error)
+	GetEffectIntentByKey(context.Context, string) (harnessmodel.EffectIntent, error)
+	ListUncertainEffects(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.EffectIntent, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -99,6 +102,9 @@ type Tx interface {
 	DeliverSignal(context.Context, harnessmodel.NodeRunID, harnessmodel.SignalID, time.Time) error
 	CreateApproval(context.Context, harnessmodel.Approval) error
 	CompareAndSwapApproval(context.Context, harnessmodel.ApprovalState, harnessmodel.Approval) error
+	PutEffectIntent(context.Context, harnessmodel.EffectIntent) (harnessmodel.EffectIntent, bool, error)
+	CompareAndSwapEffectIntent(context.Context, harnessmodel.EffectState, harnessmodel.EffectIntent) error
+	RecordEffectReconciliation(context.Context, harnessmodel.EffectIntentID, harnessmodel.EffectState, time.Time) (harnessmodel.EffectIntent, error)
 	CancelWorkflowRuntime(context.Context, harnessmodel.WorkflowRunID, time.Time) (WorkflowCancellationStats, error)
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
