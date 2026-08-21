@@ -84,8 +84,12 @@ func Validate(def ir.Definition) error {
 
 func validateRetryPolicies(policies map[string]harnessmodel.RetryPolicySpec) error {
 	for name, policy := range policies {
-		if strings.TrimSpace(name) == "" {
+		trimmedName := strings.TrimSpace(name)
+		if trimmedName == "" {
 			return fmt.Errorf("retry policy name is required")
+		}
+		if name != trimmedName {
+			return fmt.Errorf("retry policy name %q must not contain surrounding whitespace", name)
 		}
 		if policy.MaxAttempts < 1 {
 			return fmt.Errorf("retry policy %q maxAttempts must be >= 1", name)
