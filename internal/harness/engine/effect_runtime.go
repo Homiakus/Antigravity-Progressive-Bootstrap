@@ -26,13 +26,13 @@ type EffectPrepareResult struct {
 }
 
 type EffectReconcileDecision struct {
-	Intent         harnessmodel.EffectIntent                `json:"intent"`
-	ProviderResult harnessexecutor.EffectReconcileResult   `json:"providerResult"`
-	NodeRun        harnessmodel.NodeRun                     `json:"nodeRun,omitempty"`
-	WorkflowRun    harnessmodel.WorkflowRun                 `json:"workflowRun,omitempty"`
-	RetrySafe      bool                                     `json:"retrySafe,omitempty"`
-	RequiresManual bool                                     `json:"requiresManual,omitempty"`
-	Idempotent     bool                                     `json:"idempotent,omitempty"`
+	Intent         harnessmodel.EffectIntent              `json:"intent"`
+	ProviderResult harnessexecutor.EffectReconcileResult `json:"providerResult"`
+	NodeRun        harnessmodel.NodeRun                   `json:"nodeRun,omitempty"`
+	WorkflowRun    harnessmodel.WorkflowRun               `json:"workflowRun,omitempty"`
+	RetrySafe      bool                                   `json:"retrySafe,omitempty"`
+	RequiresManual bool                                   `json:"requiresManual,omitempty"`
+	Idempotent     bool                                   `json:"idempotent,omitempty"`
 }
 
 func (e *Engine) PrepareEffect(ctx context.Context, attemptID harnessmodel.AttemptID, namespace, operation string, class harnessmodel.EffectClass, semanticInput []byte) (EffectPrepareResult, error) {
@@ -82,15 +82,11 @@ func (e *Engine) prepareEffect(ctx context.Context, attemptID harnessmodel.Attem
 		case harnessmodel.EffectConfirmed:
 			result.AlreadyConfirmed = true
 		case harnessmodel.EffectDispatched:
-			// A repeated dispatch is semantically safe only for classes that
-			// explicitly promise stable retry behavior with the same logical key.
 			result.DispatchAllowed = stored.Class.BlindRetrySafe()
 			result.RequiresReconcile = !result.DispatchAllowed
 		case harnessmodel.EffectInDoubt:
 			result.RequiresReconcile = true
 		case harnessmodel.EffectFailed:
-			// Rearming a failed logical effect is a separate explicit operation;
-			// do not silently turn a known failure into another external send.
 			result.DispatchAllowed = false
 		default:
 			return fmt.Errorf("effect %s is in non-dispatchable state %s", stored.ID, stored.State)
@@ -260,7 +256,7 @@ func (e *Engine) markEffectInDoubt(ctx context.Context, effectID harnessmodel.Ef
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "EffectInDoubt", "effect_intent", string(intent.ID), map[string]any{"attemptId": attempt.ID, "detail": detail}); err != nil { return err }
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptInDoubt", "attempt", string(attempt.ID), map[string]any{"nodeRunId": nr.ID, "effectIntentId": intent.ID}); err != nil { return err }
 		if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeInDoubt", "node_run", string(nr.ID), map[string]any{"nodeId": nr.NodeID, "effectIntentId": intent.ID}); err != nil { return err }
-		if err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil { return err }
+		if _, err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil { return err }
 		result = intent
 		return nil
 	})
