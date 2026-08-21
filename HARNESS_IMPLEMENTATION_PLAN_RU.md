@@ -1,9 +1,64 @@
 # HARNESS IMPLEMENTATION PLAN — переход `agctl` к Durable Execution Harness
 
-Статус: **implementation blueprint / migration plan**  
+Статус: **implementation blueprint / migration plan + живой журнал реализации**  
 Целевая линия: **agctl Harness Runtime 4.x**  
 Исходная база: `agctl 3.2.1`  
 Приоритеты: **Correctness → Durability → Recoverability → Explicit State → Idempotency → Observability → Extensibility → Performance → Distributed Scaling**
+
+---
+
+# Текущий статус реализации — 2026-08-21
+
+Этот блок является authoritative checkpoint для продолжения разработки. Он фиксирует не только намерения исходного плана, но и то, что фактически реализовано и проверено к текущему состоянию `main`/Stage 9.
+
+| Stage | Статус | Фактически реализовано |
+|---|---|---|
+| **0 — Model / IR / invariants** | ✅ **Завершён** | typed IDs, WorkflowDefinition/NodeSpec/WorkflowRun/NodeRun/Attempt, централизованные state transitions, invariants, DAG compiler/validation, property tests и compiler benchmarks |
+| **1 — SQLite store + migrations + events** | ✅ **Завершён** | transactional Store/View/Update API, SQLite WAL, versioned migrations, event journal/outbox, crash/reopen/migration tests, store benchmarks |
+| **2 — Legacy import** | ✅ **Завершён** | `migratelegacy`, dry-run/status CLI, idempotent import, incomplete-history semantics, legacy recovery handling |
+| **3 — Transactional engine** | ✅ **Завершён** | StartWorkflow, durable roots/READY, success/failure propagation, fan-in/fan-out, terminal workflow/progress semantics, atomic event+state transitions |
+| **4 — Incremental scheduler** | ✅ **Завершён** | durable ready queue, dependency counters, fair workflow lanes, resource constraints, wait/explain reasons, scheduler benchmarks |
+| **5 — Attempts + leases + fencing** | ✅ **Завершён** | immutable attempts, worker registry, durable leases, epochs/fencing, heartbeat/reclaim, stale completion rejection |
+| **6 — Process executor + cancellation** | ✅ **Завершён** | Executor contract, cross-platform process runtime, tree cancellation, bounded/streamed logs, timeout classes, reconciliation of live process state |
+| **7 — Retry / error taxonomy / circuit breaker** | ✅ **Завершён** | typed retry classification, retry schedules, new Attempt per retry, budgets, circuit breaker, pause-aware retry runtime, retry-storm benchmark |
+| **8 — Timers / signals / pause / approval** | ✅ **Завершён** | SQLite schema v6, durable timers, signal inbox/waiters + dedupe, signal-before-waiter, approvals + TTL, pause/resume, atomic cancel, CLI control plane, restart tests, Stage 8 benchmark |
+| **9 — Side effects / idempotency / `IN_DOUBT`** | 🟡 **Частично реализован — текущая точка остановки** | EffectClass/EffectIntent, stable semantic idempotency keys, schema v7 `effect_intents` + per-Attempt `effect_attempt_bindings`, CAS/store/recovery queries, optional executor `EffectReconciler`, engine PREPARED→DISPATCHED→CONFIRMED/FAILED/IN_DOUBT lifecycle, fenced variants, reconciliation decisions and Node `IN_DOUBT` recovery |
+| **10 — Artifact CAS / provenance** | ⬜ Не начат | Следующий stage после полного закрытия Stage 9 |
+| **11 — Cache / invalidation** | ⬜ Не начат | — |
+| **12 — Replanner GraphRevision migration** | ⬜ Не начат | — |
+| **13 — Workspace / worktree runtime** | ⬜ Не начат | — |
+| **14 — Agent executor / budgets / checkpoints** | ⬜ Не начат | — |
+| **15 — MCP executor / tool registry** | ⬜ Не начат | — |
+| **16 — Policy / secrets / trust** | ⬜ Не начат | — |
+| **17 — OTel / explainability** | ⬜ Не начат | — |
+| **18 — REST / SSE / dashboard** | ⬜ Не начат | — |
+| **19 — Remote workers** | ⬜ Не начат | — |
+| **20 — Postgres / HA** | ⬜ Не начат | Только при доказанной необходимости |
+
+## Точная точка остановки Stage 9
+
+На текущем checkpoint уже существует durable модель внешнего эффекта и engine lifecycle. **Следующий пункт реализации — закрыть lease-reclaim crash window**:
+
+1. Доработать `internal/harness/engine/lease_runtime.go::ReclaimExpiredAttempt`.
+2. Перед reclaim читать связанные effect intents через `ListEffectIntentsByAttempt`.
+3. Если истёкший Attempt уже имеет `DISPATCHED`/uncertain side effect и класс не разрешает доказуемый safe retry, **не передавать Attempt новому worker вслепую**.
+4. Переводить effect → `IN_DOUBT`, Attempt → `IN_DOUBT`, NodeRun → `IN_DOUBT`, закрывать старый lease и направлять операцию в reconciliation.
+5. Для `QUERYABLE` использовать provider-specific evidence; `UNKNOWN` не разрешает blind retry.
+6. После доказанного `ABSENT` разрешать controlled retry/re-arm с тем же logical idempotency key.
+7. Реализовать reconciliation adapters минимум для Git, GitHub, MCP и filesystem/content-hash операций.
+8. Добавить crash/fault tests для окна: **external effect succeeded → process killed before durable CONFIRMED commit**.
+9. Добавить тесты stale worker result / duplicate dispatch / restart with `DISPATCHED` effect / provider `CONFIRMED|ABSENT|FAILED|UNKNOWN`.
+10. Только после этих тестов отметить Stage 9 как ✅ и переходить к Stage 10.
+
+### Уже зафиксированные Stage 9 invariants
+
+- AttemptID **не входит** в stable effect idempotency key; retries одной logical operation используют тот же key.
+- Logical identity включает `workflow_run_id + node_run_id + operation namespace + operation + semantic input digest`.
+- `DISPATCHED` означает: внешний эффект уже мог произойти; потеря ответа не превращается автоматически в обычный `FAILED`.
+- `UNKNOWN` reconciliation не считается доказательством отсутствия эффекта.
+- `NON_IDEMPOTENT_UNKNOWN` нельзя повторять blindly.
+- per-Attempt bindings сохраняют audit trail физических попыток, не заменяя identity logical effect.
+- `IN_DOUBT` является explicit durable state, а не текстовой ошибкой.
 
 ---
 
