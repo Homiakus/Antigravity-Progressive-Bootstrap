@@ -119,11 +119,15 @@ func (e *Engine) tryScheduleRetry(ctx context.Context, attemptID harnessmodel.At
 			result.RetrySchedule = &schedule
 			return nil
 		}
-		if attempt.State != harnessmodel.AttemptRunning {
-			return fmt.Errorf("cannot retry failure attempt %s from state %s", attempt.ID, attempt.State)
-		}
+		// The fence is checked before the Attempt lifecycle state for the same
+		// reason as success/failure completion: after reclaim, the old owner must
+		// receive ErrStaleFence even if the new owner has not started execution
+		// yet and the Attempt is still CLAIMED.
 		if err := authorizeCompletion(ctx, tx, attempt, fence, now); err != nil {
 			return err
+		}
+		if attempt.State != harnessmodel.AttemptRunning {
+			return fmt.Errorf("cannot retry failure attempt %s from state %s", attempt.ID, attempt.State)
 		}
 		if nr.State != harnessmodel.NodeRunning {
 			return fmt.Errorf("attempt %s is RUNNING but node %s is %s", attempt.ID, nr.ID, nr.State)
