@@ -47,6 +47,9 @@ jobs:
       - name: Stage 7 retry storm smoke benchmark
         run: go test ./internal/harness/retry -run '^$' -bench '^BenchmarkRetryDecisionStorm100K$' -benchtime=1x -benchmem
 
+      - name: Stage 8 durable wait smoke benchmark
+        run: go test ./internal/harness/store/sqlite -run '^$' -bench '^BenchmarkDurableWaitDueTimerScan10K$' -benchtime=1x -benchmem
+
   windows:
     runs-on: windows-latest
     timeout-minutes: 30
