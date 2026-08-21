@@ -23,6 +23,23 @@ func TestBuildDSNAppliesPragmasPerConnection(t *testing.T) {
 	}
 }
 
+func TestBuildDSNCanonicalizesAbsoluteWindowsDriveURI(t *testing.T) {
+	// Use forward slashes so this assertion is meaningful on every CI host;
+	// filepath.ToSlash performs the equivalent conversion on Windows runtime
+	// paths before sqliteURIPath sees them.
+	dsn := buildDSN("D:/a/work/repo/state.db", Options{})
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := u.Path, "/D:/a/work/repo/state.db"; got != want {
+		t.Fatalf("SQLite URI path=%q want=%q (dsn=%q)", got, want, dsn)
+	}
+	if !strings.HasPrefix(dsn, "file:///D:/a/work/repo/state.db?") {
+		t.Fatalf("Windows SQLite DSN is not an absolute file URI: %q", dsn)
+	}
+}
+
 func TestOpenAppliesDurabilityPragmas(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(ctx, filepath.Join(t.TempDir(), "state.db"), Options{})
