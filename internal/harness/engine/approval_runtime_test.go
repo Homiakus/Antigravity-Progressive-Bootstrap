@@ -144,7 +144,7 @@ func TestApprovalExpirySurvivesAsDurableTimerAndFailsClosed(t *testing.T) {
 		t.Fatalf("expired approval workflow=%s want FAILED", got.State)
 	}
 	var fired int
-	if err := db.SQLDB().QueryRow(`SELECT COUNT(*) FROM timers WHERE kind=? AND state=? AND payload=?`, string(harnessmodel.TimerApprovalExpiry), string(harnessmodel.TimerFired), string(approval.ID)).Scan(&fired); err != nil {
+	if err := db.SQLDB().QueryRow(`SELECT COUNT(*) FROM timers WHERE kind=? AND state=? AND payload=?`, string(harnessmodel.TimerApprovalExpiry), string(harnessmodel.TimerFired), []byte(approval.ID)).Scan(&fired); err != nil {
 		t.Fatal(err)
 	}
 	if fired != 1 {
