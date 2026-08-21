@@ -18,10 +18,9 @@ type DB struct {
 	// in-process read/modify/write transactions before they enter SQLite.
 	//
 	// Do not use modernc's _txlock=immediate DSN option here: it is not
-	// cross-platform reliable for this driver/version (Windows can fail during
-	// initial Ping with SQLITE_NOMEM). Correctness therefore depends on the
-	// explicit single-writer pool plus SQL CAS/UPSERT invariants, not a
-	// driver-specific connection option.
+	// cross-platform reliable for this driver/version. Correctness therefore
+	// depends on the explicit single-writer pool plus SQL CAS/UPSERT
+	// invariants, not a driver-specific connection option.
 	db *sql.DB
 	// readDB keeps WAL reads concurrent and independent of the writer queue.
 	readDB *sql.DB
@@ -102,13 +101,31 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 
 func buildDSN(path string, opts Options) string {
 	opts = opts.normalized()
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	u := &url.URL{Scheme: "file", Path: sqliteURIPath(path)}
 	q := url.Values{}
 	for _, pragma := range pragmaValues(opts) {
 		q.Add("_pragma", pragma)
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// sqliteURIPath converts an absolute filesystem path into SQLite's URI path
+// form. In particular, SQLite requires an absolute Windows drive path to be
+// represented as /D:/dir/file.db. Without the leading slash, file:D:/... is a
+// relative URI path; modernc/sqlite then fails sqlite3_open_v2 with
+// SQLITE_CANTOPEN (older releases can misleadingly append "out of memory" to
+// that error).
+func sqliteURIPath(path string) string {
+	path = filepath.ToSlash(path)
+	if len(path) >= 3 && isASCIILetter(path[0]) && path[1] == ':' && path[2] == '/' {
+		return "/" + path
+	}
+	return path
+}
+
+func isASCIILetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func (d *DB) Close() error {
