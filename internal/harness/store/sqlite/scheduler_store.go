@@ -40,6 +40,10 @@ func (t *transaction) EnqueueReadyNode(ctx context.Context, nodeRunID harnessmod
 	if nodeRunID == "" || readyAt.IsZero() {
 		return fmt.Errorf("node run id and ready time are required")
 	}
+	notBeforeNS, err := nullableCheckedUnixNano(notBefore)
+	if err != nil {
+		return fmt.Errorf("invalid ready not-before deadline: %w", err)
+	}
 	res, err := t.tx.ExecContext(ctx, `
 INSERT INTO ready_queue(
     node_run_id, workflow_run_id, priority, effective_priority,
@@ -60,7 +64,7 @@ ON CONFLICT(node_run_id) DO UPDATE SET
     wait_reason='',
     wait_detail='',
     updated_at=excluded.updated_at`,
-		formatTime(readyAt), nullableTime(notBefore), nullableUnixNano(notBefore), resourceClass, formatTime(readyAt), string(nodeRunID), string(harnessmodel.NodeReady))
+		formatTime(readyAt), nullableTime(notBefore), notBeforeNS, resourceClass, formatTime(readyAt), string(nodeRunID), string(harnessmodel.NodeReady))
 	if err != nil {
 		return fmt.Errorf("enqueue ready node: %w", err)
 	}
@@ -123,6 +127,10 @@ WHERE rq.node_run_id=? AND nr.state=?`, string(nodeRunID), string(harnessmodel.N
 }
 
 func (t *transaction) ListReadyWorkflowLanes(ctx context.Context, now time.Time, limit int) ([]harnessmodel.WorkflowScheduleState, error) {
+	nowNS, err := checkedUnixNano(now)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scheduler query time: %w", err)
+	}
 	if limit <= 0 || limit > 10000 {
 		limit = 256
 	}
@@ -143,7 +151,7 @@ ORDER BY (CAST(ws.service_count AS REAL) / CAST(ws.weight AS REAL)) ASC,
          CASE WHEN ws.last_selected_at IS NULL THEN 0 ELSE 1 END ASC,
          ws.last_selected_at ASC,
          ws.workflow_run_id ASC
-LIMIT ?`, string(harnessmodel.WorkflowRunning), string(harnessmodel.NodeReady), now.UnixNano(), limit)
+LIMIT ?`, string(harnessmodel.WorkflowRunning), string(harnessmodel.NodeReady), nowNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list ready workflow lanes: %w", err)
 	}
@@ -187,6 +195,10 @@ JOIN nodes n
 `
 
 func (t *transaction) ListReadyNodes(ctx context.Context, runID harnessmodel.WorkflowRunID, now time.Time, limit int) ([]harnessmodel.ReadyNode, error) {
+	nowNS, err := checkedUnixNano(now)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scheduler query time: %w", err)
+	}
 	if limit <= 0 || limit > 10000 {
 		limit = 64
 	}
@@ -196,7 +208,7 @@ WHERE rq.workflow_run_id=?
   AND (rq.not_before_ns IS NULL OR rq.not_before_ns<=?)
 ORDER BY CASE WHEN rq.wait_reason='' THEN 0 ELSE 1 END ASC,
          rq.effective_priority DESC, rq.priority DESC, rq.ready_at ASC, rq.node_run_id ASC
-LIMIT ?`, string(runID), string(harnessmodel.NodeReady), now.UnixNano(), limit)
+LIMIT ?`, string(runID), string(harnessmodel.NodeReady), nowNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list ready nodes: %w", err)
 	}
@@ -243,11 +255,4 @@ func scanReadyNode(row interface{ Scan(...any) error }) (harnessmodel.ReadyNode,
 	}
 	node.Resources = spec.Resources
 	return node, nil
-}
-
-func nullableUnixNano(value time.Time) any {
-	if value.IsZero() {
-		return nil
-	}
-	return value.UnixNano()
 }
