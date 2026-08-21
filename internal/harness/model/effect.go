@@ -29,9 +29,6 @@ func (c EffectClass) Valid() bool {
 	}
 }
 
-// BlindRetrySafe reports whether repeating the same logical operation is safe
-// without first querying external state. QUERYABLE/COMPENSATABLE intentionally
-// return false: they have recovery mechanisms, but not blind-repeat semantics.
 func (c EffectClass) BlindRetrySafe() bool {
 	return c == EffectPure || c == EffectIdempotent || c == EffectIdempotentWithKey
 }
@@ -60,9 +57,6 @@ func (s EffectState) Terminal() bool {
 	return s == EffectConfirmed || s == EffectFailed || s == EffectCompensated
 }
 
-// EffectIntent represents one logical external operation across all physical
-// Attempts. OriginAttemptID is immutable. LastAttemptID may advance when a
-// retry reuses the same stable idempotency key.
 type EffectIntent struct {
 	ID                  EffectIntentID `json:"id"`
 	WorkflowRunID       WorkflowRunID  `json:"workflowRunId"`
@@ -86,13 +80,14 @@ type EffectIntent struct {
 	LastReconciledAt    time.Time      `json:"lastReconciledAt,omitempty"`
 }
 
-// BuildEffectIdentity creates a versioned stable key from logical operation
-// identity. AttemptID is deliberately absent, so retries reuse the same key.
-// Fields are length-prefixed before hashing to avoid concatenation ambiguity.
-func BuildEffectIdentity(runID WorkflowRunID, nodeRunID NodeRunID, namespace string, semanticInput []byte) (key, inputDigest string, err error) {
+// BuildEffectIdentity creates a stable identity for one logical side effect.
+// AttemptID is deliberately absent: retries of the same node operation and
+// semantic input reuse the same idempotency key.
+func BuildEffectIdentity(runID WorkflowRunID, nodeRunID NodeRunID, namespace, operation string, semanticInput []byte) (key, inputDigest string, err error) {
 	namespace = strings.TrimSpace(namespace)
-	if runID == "" || nodeRunID == "" || namespace == "" {
-		return "", "", fmt.Errorf("workflow run id, node run id and operation namespace are required")
+	operation = strings.TrimSpace(operation)
+	if runID == "" || nodeRunID == "" || namespace == "" || operation == "" {
+		return "", "", fmt.Errorf("workflow run id, node run id, operation namespace and operation are required")
 	}
 	inputSum := sha256.Sum256(semanticInput)
 	inputDigest = "sha256:" + hex.EncodeToString(inputSum[:])
@@ -102,6 +97,7 @@ func BuildEffectIdentity(runID WorkflowRunID, nodeRunID NodeRunID, namespace str
 	writeEffectKeyPart(h, string(runID))
 	writeEffectKeyPart(h, string(nodeRunID))
 	writeEffectKeyPart(h, namespace)
+	writeEffectKeyPart(h, operation)
 	writeEffectKeyPart(h, inputDigest)
 	return "effk_v1_" + hex.EncodeToString(h.Sum(nil)), inputDigest, nil
 }
