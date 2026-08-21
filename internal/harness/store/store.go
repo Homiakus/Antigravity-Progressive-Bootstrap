@@ -20,6 +20,16 @@ type Store interface {
 	Close() error
 }
 
+type WorkflowCancellationStats struct {
+	Nodes       int `json:"nodes"`
+	Attempts    int `json:"attempts"`
+	Leases      int `json:"leases"`
+	Timers      int `json:"timers"`
+	SignalWaits int `json:"signalWaits"`
+	Approvals   int `json:"approvals"`
+	Retries     int `json:"retries"`
+}
+
 type Reader interface {
 	GetWorkflowDefinition(context.Context, harnessmodel.WorkflowDefinitionID, int) (harnessmodel.WorkflowDefinition, error)
 	GetWorkflowRun(context.Context, harnessmodel.WorkflowRunID) (harnessmodel.WorkflowRun, error)
@@ -89,5 +99,6 @@ type Tx interface {
 	DeliverSignal(context.Context, harnessmodel.NodeRunID, harnessmodel.SignalID, time.Time) error
 	CreateApproval(context.Context, harnessmodel.Approval) error
 	CompareAndSwapApproval(context.Context, harnessmodel.ApprovalState, harnessmodel.Approval) error
+	CancelWorkflowRuntime(context.Context, harnessmodel.WorkflowRunID, time.Time) (WorkflowCancellationStats, error)
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }
