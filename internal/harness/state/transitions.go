@@ -17,7 +17,7 @@ var workflowTransitions = map[WorkflowState]map[WorkflowState]struct{}{
 	WorkflowValidating: set(WorkflowQueued, WorkflowFailed, WorkflowCancelled, WorkflowBlocked),
 	WorkflowQueued:     set(WorkflowRunning, WorkflowCancelling, WorkflowCancelled, WorkflowBlocked, WorkflowFailed),
 	WorkflowRunning:    set(WorkflowPausing, WorkflowCancelling, WorkflowSucceeded, WorkflowFailed, WorkflowBlocked),
-	WorkflowPausing:    set(WorkflowPaused, WorkflowCancelling, WorkflowFailed, WorkflowBlocked),
+	WorkflowPausing:    set(WorkflowPaused, WorkflowCancelling, WorkflowSucceeded, WorkflowFailed, WorkflowBlocked),
 	WorkflowPaused:     set(WorkflowRunning, WorkflowCancelling, WorkflowCancelled, WorkflowBlocked),
 	WorkflowCancelling: set(WorkflowCancelled, WorkflowFailed),
 	WorkflowBlocked:    set(WorkflowRunning, WorkflowCancelling, WorkflowCancelled, WorkflowFailed),
