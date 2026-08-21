@@ -25,7 +25,7 @@ var workflowTransitions = map[WorkflowState]map[WorkflowState]struct{}{
 
 var nodeTransitions = map[NodeState]map[NodeState]struct{}{
 	NodePendingDependencies: set(NodeReady, NodeSkipped, NodeCancelled, NodeUnschedulable),
-	NodeReady:               set(NodeQueued, NodeSkipped, NodeCancelled, NodeUnschedulable),
+	NodeReady:               set(NodeQueued, NodeWaiting, NodeSkipped, NodeCancelled, NodeUnschedulable),
 	NodeQueued:              set(NodeRunning, NodeCancelled, NodeUnschedulable),
 	NodeRunning:             set(NodeWaiting, NodeRetryWait, NodeInDoubt, NodeSucceeded, NodeFailed, NodeTimedOut, NodeCancelled),
 	NodeWaiting:             set(NodeReady, NodeRunning, NodeCancelled, NodeFailed, NodeTimedOut),
