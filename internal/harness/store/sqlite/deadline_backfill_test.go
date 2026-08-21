@@ -97,3 +97,11 @@ func TestVersionFourMalformedReadyDeadlineFailsOpenInsteadOfSchedulingEarly(t *t
 		t.Fatalf("malformed historical deadline did not fail startup: %v", err)
 	}
 }
+
+func TestVersionFourOutOfRangeReadyDeadlineFailsOpenInsteadOfWrapping(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.db")
+	seedV4ReadyDeadline(t, path, formatTime(maxUnixNanoTime.Add(time.Nanosecond)))
+	if _, err := Open(context.Background(), path, Options{}); err == nil || !strings.Contains(err.Error(), "not representable durably") {
+		t.Fatalf("out-of-range historical deadline did not fail startup: %v", err)
+	}
+}
