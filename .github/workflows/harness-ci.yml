@@ -21,6 +21,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Verify module graph is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
       - name: Unit and integration tests
         run: go test ./...
 
