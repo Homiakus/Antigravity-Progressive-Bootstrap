@@ -14,11 +14,16 @@ import (
 
 type DB struct {
 	// db is the authoritative writer/admin handle. SQLite has one physical
-	// writer at a time, so a single connection plus BEGIN IMMEDIATE converts
-	// in-process writer races into queueing instead of BUSY_SNAPSHOT upgrades.
+	// writer at a time; keeping exactly one writer connection serializes all
+	// in-process read/modify/write transactions before they enter SQLite.
+	//
+	// Do not use modernc's _txlock=immediate DSN option here: it is not
+	// cross-platform reliable for this driver/version (Windows can fail during
+	// initial Ping with SQLITE_NOMEM). Correctness therefore depends on the
+	// explicit single-writer pool plus SQL CAS/UPSERT invariants, not a
+	// driver-specific connection option.
 	db *sql.DB
-	// readDB keeps WAL reads concurrent and deliberately uses the driver's
-	// default deferred transaction mode rather than write intent.
+	// readDB keeps WAL reads concurrent and independent of the writer queue.
 	readDB *sql.DB
 	path   string
 	opts   Options
@@ -37,7 +42,7 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 	}
 	opts = opts.normalized()
 
-	writer, err := sql.Open("sqlite", buildWriterDSN(abs, opts))
+	writer, err := sql.Open("sqlite", buildDSN(abs, opts))
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite writer: %w", err)
 	}
@@ -96,22 +101,11 @@ func Open(ctx context.Context, path string, opts Options) (*DB, error) {
 }
 
 func buildDSN(path string, opts Options) string {
-	return buildDSNWithTxLock(path, opts, "")
-}
-
-func buildWriterDSN(path string, opts Options) string {
-	return buildDSNWithTxLock(path, opts, "immediate")
-}
-
-func buildDSNWithTxLock(path string, opts Options, txLock string) string {
 	opts = opts.normalized()
 	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
 	q := url.Values{}
 	for _, pragma := range pragmaValues(opts) {
 		q.Add("_pragma", pragma)
-	}
-	if txLock != "" {
-		q.Set("_txlock", txLock)
 	}
 	u.RawQuery = q.Encode()
 	return u.String()
