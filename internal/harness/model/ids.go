@@ -19,6 +19,7 @@ type WorkerID string
 type LeaseID string
 type ArtifactID string
 type EventID string
+type TimerID string
 type SignalID string
 type ApprovalID string
 
@@ -33,6 +34,7 @@ const (
 	IDLease              IDKind = "lea"
 	IDArtifact           IDKind = "art"
 	IDEvent              IDKind = "evt"
+	IDTimer              IDKind = "tmr"
 	IDSignal             IDKind = "sig"
 	IDApproval           IDKind = "apr"
 )
@@ -76,7 +78,7 @@ func (g TimeSortableIDGenerator) New(kind IDKind) (string, error) {
 
 func validIDKind(kind IDKind) bool {
 	switch kind {
-	case IDWorkflowDefinition, IDWorkflowRun, IDNodeRun, IDAttempt, IDWorker, IDLease, IDArtifact, IDEvent, IDSignal, IDApproval:
+	case IDWorkflowDefinition, IDWorkflowRun, IDNodeRun, IDAttempt, IDWorker, IDLease, IDArtifact, IDEvent, IDTimer, IDSignal, IDApproval:
 		return true
 	default:
 		return false
