@@ -118,11 +118,15 @@ func (e *Engine) completeAttemptSuccess(ctx context.Context, attemptID harnessmo
 			}
 			return nil
 		}
-		if attempt.State != harnessmodel.AttemptRunning {
-			return fmt.Errorf("cannot succeed attempt %s from state %s", attempt.ID, attempt.State)
-		}
+		// Ownership/fencing is authoritative before lifecycle semantics. A stale
+		// worker must never learn or act on the current attempt state as if it
+		// still owned the attempt; in particular a reclaimed CLAIMED attempt must
+		// reject the old epoch with ErrStaleFence rather than a state error.
 		if err := authorizeCompletion(ctx, tx, attempt, fence, now); err != nil {
 			return err
+		}
+		if attempt.State != harnessmodel.AttemptRunning {
+			return fmt.Errorf("cannot succeed attempt %s from state %s", attempt.ID, attempt.State)
 		}
 		nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID)
 		if err != nil {
@@ -235,11 +239,11 @@ func (e *Engine) completeAttemptFailure(ctx context.Context, attemptID harnessmo
 			}
 			return nil
 		}
-		if attempt.State != harnessmodel.AttemptRunning {
-			return fmt.Errorf("cannot fail attempt %s from state %s", attempt.ID, attempt.State)
-		}
 		if err := authorizeCompletion(ctx, tx, attempt, fence, now); err != nil {
 			return err
+		}
+		if attempt.State != harnessmodel.AttemptRunning {
+			return fmt.Errorf("cannot fail attempt %s from state %s", attempt.ID, attempt.State)
 		}
 		nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID)
 		if err != nil {
