@@ -82,3 +82,25 @@ if (-not $agctl) { $agctl = Join-Path $PWD 'agctl.exe' }
   `agctl dashboard` → `apps/web` (session-лог + SSE).
 - До перехода этот навык даёт рабочую поверхность без переписывания
   Go-движка и без зависимости от AGY.
+
+## Связка с установленными DSH-навыками (master-prompt-skills v2.1)
+
+Этот workspace несёт и domain-навыки (`<projectRoot>/.agents/skills`), которые
+DSH обнаруживает автоматически. Используйте их совместно с `agctl`:
+
+| Подсистема agctl | Подходящий установленный навык | Когда применять |
+|---|---|---|
+| TUI (`internal/tui`, Bubble Tea) | **`go-tui-premium-ui`** | доработка 3-колоночного TUI: keymap, layout, themes, status/progress, tests |
+| Doctor / веб-панель | **`web-visual-runtime-validation`** (после `agctl dashboard serve`) | проверка визуального качества дашборда |
+| Планы/задачи/проект | **`deep-codebase-integrity-audit`** | evidence-driven аудит Go-кодовой базы: дубли, override-дрейф, магические значения, аллокации |
+| Веб-дашборд (`internal/dashboard`) | **`premium-editorial-ui`**, **`responsive-web-quality`** | арт-дирекшн и адаптивность дашборда |
+| Аудит намерения | **`motion-icons-status-themes`** | точечная доводка состояний/тем, не полный редизайн |
+| Контент-поверхности | **`cms-editorial-workflow-ux`**, **`markdown-live-preview-editor`** | если проект расширяется контент-редактором |
+
+Запускайте `web-visual-runtime-validation` **после** изменения любого
+model-видимого UI (`agctl dashboard`), а `deep-codebase-integrity-audit` —
+перед крупным рефакторингом `internal/harness`.
+
+> Всё это работает без AGY: DSH читает `.agents/skills`, `agctl.exe`
+> выполняется как sidecar через `pwsh`, а model-видимый вывод идёт в
+> session-лог DSH (соответствует правилу DSH «model-visible ⟺ logged»).
