@@ -81,7 +81,15 @@
 
 ---
 
-## 5. Что осталось для «полностью нативного» порта (стратегия B)
+## 5. Нативный порт (стратегия B) — начат
+
+План порта зафиксирован в DSH: `.agents/notes/proposed/architecture/2026-08-21-agctl-to-dsh-plugin-port.md`
+(карта agctl → DSH-extension points + порядок создания плагинов). Первый
+плагин `@deepseek-ai/dsh-agctl-security` (Security Score 0..100) создан как
+scaffold: ядро `src/score.ts` + 13 unit-тестов проходят (`pnpm exec vitest run`).
+Cordis-шов (Service Definition + Provider + Consumer) — следующий инкремент.
+
+## 5.1. Что осталось для «полностью нативного» порта (стратегия B)
 
 Текущая адаптация делает систему **полностью рабочей и discoverable под DSH**,
 но исполняющее ядро остаётся Go-sidecar. Для полного ухода от Go нужен порт
