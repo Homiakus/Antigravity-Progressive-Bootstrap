@@ -1,0 +1,143 @@
+{
+  "package": "master-prompt-skills",
+  "version": "2.1.0",
+  "format": "Agent Skills open standard",
+  "architecture": "progressive-disclosure + progressive visual runtime validation",
+  "skills": [
+    {
+      "name": "cms-editorial-workflow-ux",
+      "version": "2.1.0",
+      "skill_md_lines": 86,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md",
+        "visual-runtime-integration.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "f32e34663efdb17d9bace695644ffe1c1deae9d22d5e9b4a5d62b6e8d8c194f7"
+    },
+    {
+      "name": "deep-codebase-integrity-audit",
+      "version": "2.0.0",
+      "skill_md_lines": 84,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "7412c0228894dfa8ba0323653cc227942bdb47887704b43fcb968a0ce8356c44"
+    },
+    {
+      "name": "go-tui-premium-ui",
+      "version": "2.0.0",
+      "skill_md_lines": 84,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "91c21544e2d731d17789c72a3cb01e4d9c8ec2efe9a37871ca5c2635e1a01305"
+    },
+    {
+      "name": "markdown-live-preview-editor",
+      "version": "2.1.0",
+      "skill_md_lines": 87,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md",
+        "visual-runtime-integration.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "8d353524cac7d81bcc689673a3d1d4b35d40e75deba3ab1d70f32d46da6b2db6"
+    },
+    {
+      "name": "motion-icons-status-themes",
+      "version": "2.1.0",
+      "skill_md_lines": 87,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md",
+        "visual-runtime-integration.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "9125afe1c457074c2b3d8b417cae44df29957a1c91d4adc5d5f43426af92e002"
+    },
+    {
+      "name": "obsidian-plugin-premium-ui-suite",
+      "version": "2.0.0",
+      "skill_md_lines": 84,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "4559207a2c1664a61a7da92ceb8d00a2beda144d9bb055353402eedfda121c92"
+    },
+    {
+      "name": "premium-editorial-ui",
+      "version": "2.1.0",
+      "skill_md_lines": 89,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md",
+        "visual-runtime-integration.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "09b4d6b06a24515264786e2e0fa502496a909100c4c76fc60ea7471a3fb92cf4"
+    },
+    {
+      "name": "responsive-web-quality",
+      "version": "2.1.0",
+      "skill_md_lines": 87,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "practice-upgrades.md",
+        "sources.md",
+        "visual-runtime-integration.md"
+      ],
+      "assets": [],
+      "sha256_skill_md": "5ef63feedc496e435ec45dbbc14d3df578cb8b00b9335c98b1174bf6c5abecc7"
+    },
+    {
+      "name": "web-visual-runtime-validation",
+      "version": "2.1.0",
+      "skill_md_lines": 239,
+      "references": [
+        "evals.md",
+        "full-spec.md",
+        "output-contract.md",
+        "playwright-harness.md",
+        "sources.md",
+        "tool-contract.md",
+        "vlm-routing.md"
+      ],
+      "assets": [
+        "visual-evidence.schema.json"
+      ],
+      "sha256_skill_md": "29fbfddccc4de66edcdfdd1fe40d26d54621469d585e7e28d8f02a880cda8d4b"
+    }
+  ]
+}

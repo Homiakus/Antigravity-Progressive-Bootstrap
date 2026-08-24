@@ -1,0 +1,3 @@
+# Output contract
+
+The audit must include: executive summary/architecture; SSOT and writer-reader matrices; default/override precedence; magic value/unit/string findings; duplicate state/contract/logic and collisions; overengineering; complexity with expected N/evidence; allocation/performance measurements or `Requires measurement`; concurrency/retry/cache/resource/error ownership; prioritized findings with IDs/confidence/root cause; target architecture; dependency-ordered remediation plan. Every task must state Task ID, priority, dependencies, finding IDs, files/functions, current/target behavior, exact steps, migration, tests/benchmarks/failure cases, rollback, and Definition of Done.
