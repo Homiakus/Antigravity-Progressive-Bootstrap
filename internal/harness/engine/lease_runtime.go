@@ -177,6 +177,7 @@ func (e *Engine) ReclaimExpiredAttempt(ctx context.Context, attemptID harnessmod
 	}
 	now := e.now().UTC()
 	var result harnessmodel.Lease
+	var inDoubtErr error
 	err = e.store.Update(ctx, func(tx harnessstore.Tx) error {
 		worker, err := tx.GetWorker(ctx, workerID)
 		if err != nil {
@@ -199,6 +200,79 @@ func (e *Engine) ReclaimExpiredAttempt(ctx context.Context, attemptID harnessmod
 		if !harnesslease.Expired(current, now) {
 			return fmt.Errorf("attempt %s lease epoch %d is still valid until %s", attempt.ID, current.Epoch, current.ExpiresAt.UTC().Format(time.RFC3339Nano))
 		}
+
+		intents, err := tx.ListEffectIntentsByAttempt(ctx, attempt.ID, 100)
+		if err != nil {
+			return err
+		}
+		hasUncertainEffects := false
+		for _, intent := range intents {
+			if (intent.State == harnessmodel.EffectDispatched || intent.State == harnessmodel.EffectInDoubt) && !intent.Class.BlindRetrySafe() {
+				hasUncertainEffects = true
+				break
+			}
+		}
+
+		if hasUncertainEffects {
+			if err := tx.CloseLease(ctx, attempt.ID, current.WorkerID, current.Epoch, harnessmodel.LeaseExpired, now); err != nil {
+				return err
+			}
+			nr, err := tx.GetNodeRun(ctx, attempt.NodeRunID)
+			if err != nil {
+				return err
+			}
+			run, err := tx.GetWorkflowRun(ctx, nr.WorkflowRunID)
+			if err != nil {
+				return err
+			}
+
+			for _, intent := range intents {
+				if intent.State == harnessmodel.EffectDispatched && !intent.Class.BlindRetrySafe() {
+					intent.State = harnessmodel.EffectInDoubt
+					intent.ErrorClass = effectUnknownClass
+					intent.ErrorMessage = "lease expired while effect was in dispatched state"
+					if err := tx.CompareAndSwapEffectIntent(ctx, harnessmodel.EffectDispatched, intent); err != nil {
+						return err
+					}
+					if _, err := e.appendEvent(ctx, tx, run.ID, now, "EffectInDoubt", "effect_intent", string(intent.ID), map[string]any{
+						"attemptId": attempt.ID, "reason": "lease_expired",
+					}); err != nil {
+						return err
+					}
+				}
+			}
+
+			attempt.ErrorClass = effectUnknownClass
+			attempt.ErrorMessage = "lease expired with uncertain side effect"
+			attempt.FinishedAt = now
+			if err := transitionAttempt(ctx, tx, &attempt, harnessmodel.AttemptInDoubt); err != nil {
+				return err
+			}
+			if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeInDoubt, now); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "LeaseLost", "lease", string(current.ID), map[string]any{
+				"attemptId": attempt.ID, "workerId": current.WorkerID, "epoch": current.Epoch, "expiredAt": current.ExpiresAt,
+			}); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "AttemptInDoubt", "attempt", string(attempt.ID), map[string]any{
+				"nodeRunId": nr.ID, "reason": "lease_expired_uncertain_effect",
+			}); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeInDoubt", "node_run", string(nr.ID), map[string]any{
+				"nodeId": nr.NodeID, "reason": "lease_expired_uncertain_effect",
+			}); err != nil {
+				return err
+			}
+			if _, err := e.finalizePauseIfDrained(ctx, tx, &run, now); err != nil {
+				return err
+			}
+			inDoubtErr = fmt.Errorf("attempt %s has uncertain side effects; moved to IN_DOUBT: %w", attempt.ID, harnesslease.ErrUncertainEffect)
+			return nil
+		}
+
 		if err := tx.CloseLease(ctx, attempt.ID, current.WorkerID, current.Epoch, harnessmodel.LeaseExpired, now); err != nil {
 			return err
 		}
@@ -233,7 +307,13 @@ func (e *Engine) ReclaimExpiredAttempt(ctx context.Context, attemptID harnessmod
 		}
 		return nil
 	})
-	return result, err
+	if err != nil {
+		return harnessmodel.Lease{}, err
+	}
+	if inDoubtErr != nil {
+		return harnessmodel.Lease{}, inDoubtErr
+	}
+	return result, nil
 }
 
 func authorizeLease(ctx context.Context, tx harnessstore.Tx, attempt harnessmodel.Attempt, workerID harnessmodel.WorkerID, epoch uint64, now time.Time) error {

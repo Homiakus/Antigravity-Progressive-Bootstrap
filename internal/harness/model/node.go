@@ -76,12 +76,44 @@ const (
 	CacheUnspecified   CachePolicy = "UNSPECIFIED"
 	CacheDisabled      CachePolicy = "DISABLED"
 	CacheContent       CachePolicy = "CONTENT"
+	CacheGlobalContent CachePolicy = "GLOBAL_CONTENT"
 	CacheRunCheckpoint CachePolicy = "RUN_CHECKPOINT"
+	CacheRunLocal      CachePolicy = "RUN_LOCAL"
 )
 
 func (p CachePolicy) Valid() bool {
 	switch p {
-	case CacheUnspecified, CacheDisabled, CacheContent, CacheRunCheckpoint:
+	case CacheUnspecified, CacheDisabled, CacheContent, CacheGlobalContent, CacheRunCheckpoint, CacheRunLocal:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p CachePolicy) IsGlobal() bool {
+	return p == CacheContent || p == CacheGlobalContent
+}
+
+func (p CachePolicy) IsRunLocal() bool {
+	return p == CacheRunCheckpoint || p == CacheRunLocal
+}
+
+func (p CachePolicy) IsEnabled() bool {
+	return p.IsGlobal() || p.IsRunLocal()
+}
+
+type DeterminismClass string
+
+const (
+	DeterminismUnspecified     DeterminismClass = ""
+	DeterminismDeterministic   DeterminismClass = "DETERMINISTIC"
+	DeterminismNonDeterministic DeterminismClass = "NONDETERMINISTIC"
+	DeterminismSideEffectful   DeterminismClass = "SIDE_EFFECTFUL"
+)
+
+func (d DeterminismClass) Valid() bool {
+	switch d {
+	case DeterminismUnspecified, DeterminismDeterministic, DeterminismNonDeterministic, DeterminismSideEffectful:
 		return true
 	default:
 		return false
@@ -129,6 +161,7 @@ type NodeSpec struct {
 	Resources          ResourceSpec        `json:"resources,omitempty"`
 	Policy             PolicySpec          `json:"policy,omitempty"`
 	CachePolicy        CachePolicy         `json:"cachePolicy,omitempty"`
+	Determinism        DeterminismClass    `json:"determinism,omitempty"`
 	InputRefs          []InputRef          `json:"inputRefs,omitempty"`
 	OutputDeclarations []OutputDeclaration `json:"outputDeclarations,omitempty"`
 	Metadata           map[string]string   `json:"metadata,omitempty"`

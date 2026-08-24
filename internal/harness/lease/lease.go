@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrStaleFence   = errors.New("harness lease: stale fencing token")
-	ErrLeaseExpired = errors.New("harness lease: lease expired")
+	ErrStaleFence       = errors.New("harness lease: stale fencing token")
+	ErrLeaseExpired     = errors.New("harness lease: lease expired")
+	ErrUncertainEffect  = errors.New("harness lease: expired attempt has in-doubt side effects requiring reconciliation")
 )
 
 const DefaultTTL = 30 * time.Second

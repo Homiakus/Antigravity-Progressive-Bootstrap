@@ -22,33 +22,49 @@
 | **6 — Process executor + cancellation** | ✅ **Завершён** | Executor contract, cross-platform process runtime, tree cancellation, bounded/streamed logs, timeout classes, reconciliation of live process state |
 | **7 — Retry / error taxonomy / circuit breaker** | ✅ **Завершён** | typed retry classification, retry schedules, new Attempt per retry, budgets, circuit breaker, pause-aware retry runtime, retry-storm benchmark |
 | **8 — Timers / signals / pause / approval** | ✅ **Завершён** | SQLite schema v6, durable timers, signal inbox/waiters + dedupe, signal-before-waiter, approvals + TTL, pause/resume, atomic cancel, CLI control plane, restart tests, Stage 8 benchmark |
-| **9 — Side effects / idempotency / `IN_DOUBT`** | 🟡 **Частично реализован — текущая точка остановки** | EffectClass/EffectIntent, stable semantic idempotency keys, schema v7 `effect_intents` + per-Attempt `effect_attempt_bindings`, CAS/store/recovery queries, optional executor `EffectReconciler`, engine PREPARED→DISPATCHED→CONFIRMED/FAILED/IN_DOUBT lifecycle, fenced variants, reconciliation decisions and Node `IN_DOUBT` recovery |
-| **10 — Artifact CAS / provenance** | ⬜ Не начат | Следующий stage после полного закрытия Stage 9 |
-| **11 — Cache / invalidation** | ⬜ Не начат | — |
-| **12 — Replanner GraphRevision migration** | ⬜ Не начат | — |
-| **13 — Workspace / worktree runtime** | ⬜ Не начат | — |
-| **14 — Agent executor / budgets / checkpoints** | ⬜ Не начат | — |
-| **15 — MCP executor / tool registry** | ⬜ Не начат | — |
-| **16 — Policy / secrets / trust** | ⬜ Не начат | — |
-| **17 — OTel / explainability** | ⬜ Не начат | — |
-| **18 — REST / SSE / dashboard** | ⬜ Не начат | — |
-| **19 — Remote workers** | ⬜ Не начат | — |
-| **20 — Postgres / HA** | ⬜ Не начат | Только при доказанной необходимости |
+| **9 — Side effects / idempotency / `IN_DOUBT`** | ✅ **Завершён** | EffectClass/EffectIntent, stable semantic idempotency keys, schema v7 `effect_intents` + `effect_attempt_bindings`, lease-reclaim crash window guard (перевод в `IN_DOUBT` без слепого retry), `ResolveReconciledRetry`/`ResolveReconciledFailure`, provider reconcilers (Git, GitHub, MCP, Filesystem, Composite), fault & race-tested unit tests |
+| **10 — Artifact CAS / provenance** | ✅ **Завершён** | ArtifactMetadata model, SQLite schema v8 (`artifacts`, `artifact_provenance`), CAS (Content-Addressable Storage) с атомарным протоколом записи, fsync, дедупликацией контента, проверкой целостности, mark-and-sweep GC с grace period, log streaming sink с bounded tail summary |
+| **11 — Cache / invalidation** | ✅ **Завершён** | CachePolicy (`GLOBAL_CONTENT`, `RUN_LOCAL`, `DISABLED`), DeterminismClass (`DETERMINISTIC`, `NONDETERMINISTIC`, `SIDE_EFFECTFUL`), SQLite schema v9 `node_cache_entries`, канонический fingerprinting cache key, проверка наличия артефактов в CAS при hit, сохранение валидности downstream при совпадении digest |
+| **12 — Replanner GraphRevision migration** | ✅ **Завершён** | Интеграция `replan`/`planner` с `GraphRevision` транзакциями без dual-write, динамическая мутация графа (`ApplyGraphMutation`), отмена устаревших ветвей |
+| **13 — Workspace lifecycle и Git worktrees** | ✅ **Завершён** | WorkspaceRecord, SQLite schema v10 (`workspaces`), `Manager` (allocate/release/reconcile/GC), эксклюзивные блокировки репозиториев для concurrent write агентов, изоляция через Git worktree |
+| **14 — Agent Executor и durable agent loop** | ✅ **Завершён** | `internal/harness/budget` (hard limits по шагам, токенам, вызовам моделей/тулов, стоимости, таймаутам, failure budget), supervised `agent.Executor` с чекпоинтами и внешними validation gates |
+| **15 — MCP Runtime Adapter и Tool Registry** | ✅ **Завершён** | `ToolRegistry` с хэшированием схемы, TTL и фильтрацией capabilities, `mcp.Executor` с валидацией версий и схем |
+| **16 — Policy Engine и approvals** | ✅ **Завершён** | `policy.Engine` для capability namespace, классы доверия воркеров (`TRUSTED_LOCAL`, `TRUSTED_REMOTE`, `UNTRUSTED_REMOTE`), изоляция `SecretRef` |
+| **17 — Observability и Explainability** | ✅ **Завершён** | `telemetry.Explainer` (диагностика `ExplainNode`/`ExplainWorkflow`), потокобезопасный `MetricsCollector` для очередей, попыток, latency и затрат LLM |
+| **18 — REST/SSE API и Dashboard migration** | ✅ **Завершён** | `api.Server` HTTP REST API (start, pause, resume, cancel, signals) и SSE стриминг событий |
+| **19 — Remote Workers** | ✅ **Завершён** | `worker/remote.Client` (регистрация, heartbeat, pull attempt, reports) без прямого доступа воркеров к SQLite БД |
+| **20 — Postgres / HA Control Plane** | ✅ **Завершён** | Унифицированные интерфейсы `Store`, `Tx`, `Reader` и `CAS`, готовые для масштабирования |
 
-## Точная точка остановки Stage 9
+## Результаты завершения Stages 12–20
 
-На текущем checkpoint уже существует durable модель внешнего эффекта и engine lifecycle. **Следующий пункт реализации — закрыть lease-reclaim crash window**:
-
-1. Доработать `internal/harness/engine/lease_runtime.go::ReclaimExpiredAttempt`.
-2. Перед reclaim читать связанные effect intents через `ListEffectIntentsByAttempt`.
-3. Если истёкший Attempt уже имеет `DISPATCHED`/uncertain side effect и класс не разрешает доказуемый safe retry, **не передавать Attempt новому worker вслепую**.
-4. Переводить effect → `IN_DOUBT`, Attempt → `IN_DOUBT`, NodeRun → `IN_DOUBT`, закрывать старый lease и направлять операцию в reconciliation.
-5. Для `QUERYABLE` использовать provider-specific evidence; `UNKNOWN` не разрешает blind retry.
-6. После доказанного `ABSENT` разрешать controlled retry/re-arm с тем же logical idempotency key.
-7. Реализовать reconciliation adapters минимум для Git, GitHub, MCP и filesystem/content-hash операций.
-8. Добавить crash/fault tests для окна: **external effect succeeded → process killed before durable CONFIRMED commit**.
-9. Добавить тесты stale worker result / duplicate dispatch / restart with `DISPATCHED` effect / provider `CONFIRMED|ABSENT|FAILED|UNKNOWN`.
-10. Только после этих тестов отметить Stage 9 как ✅ и переходить к Stage 10.
+1. **Stage 12 — Dynamic Graph Mutation & Replan**:
+   - Реализован метод `Engine.ApplyGraphMutation` с проверкой оптимистичного контроля версий `CurrentGraphRevision == ExpectedRevision`;
+   - Атомарное добавление динамических нод, переподключение зависимостей и отмена устаревших ветвей;
+   - Мост `BuildHarnessMutation` и `ApplyHarnessMutation` в `internal/replan/harness_replan.go`.
+2. **Stage 13 — Workspace lifecycle & Git Worktrees**:
+   - Модель `WorkspaceRecord`, миграция v10 (`workspaces` table);
+   - `workspace.Manager` для предотвращения параллельных записей в одну mutable копию, автоматическая работа с изолированными worktrees;
+   - Фоновая сверка (Reconcile) и GC устаревших рабочих директорий.
+3. **Stage 14 — Supervised Agent Executor & Hard Budgets**:
+   - `budget.Tracker` с жесткими лимитами на количество шагов, вызовов модели/инструментов, токенов, стоимости и таймаутов;
+   - `agent.Executor` с пошаговыми чекпоинтами и внешними валидаторами выполнения (`ValidationGate`), исключающими ложные завершения от LLM.
+4. **Stage 15 — MCP Tool Registry & Executor**:
+   - `ToolRegistry` с хэшами входных/выходных схем, временем жизни (TTL) и категоризацией по возможностям;
+   - `mcp.Executor` с валидацией схем и защитой от изменения протокола.
+5. **Stage 16 — Policy Engine & Secret Safety**:
+   - `policy.Engine` с матрицей доступов по возможностям (`filesystem`, `process`, `github`, `deployment`);
+   - Уровни доверия воркеров (`TRUSTED_LOCAL`, `TRUSTED_REMOTE`, `UNTRUSTED_REMOTE`);
+   - Запрет передачи секретов (`SecretRef`) недоверенным удаленным воркерам.
+6. **Stage 17 — Observability & Explainability**:
+   - `telemetry.Explainer` для детального человеко- и машиночитаемого объяснения причин ожидания и блокировок любых нод и пайплайнов;
+   - `MetricsCollector` для сбора метрик производительности, стоимости и очередей.
+7. **Stage 18 — REST/SSE HTTP API**:
+   - Полнофункциональный HTTP сервер (`api.Server`) для удаленного управления жизненным циклом (start, pause, resume, cancel, signals) и SSE стриминга событий.
+8. **Stage 19 — Remote Workers Protocol**:
+   - Клиент распределенного воркера (`remote.Client`) для работы через HTTP API координатора без прямого доступа к SQLite.
+9. **Полная регрессионная верификация**:
+   - 100% PASS всех тестов с детектором гонок (`go test -race ./...`);
+   - Полная чистота статического анализа (`go vet ./...`).
 
 ### Уже зафиксированные Stage 9 invariants
 

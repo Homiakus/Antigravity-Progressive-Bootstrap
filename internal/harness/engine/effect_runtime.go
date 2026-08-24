@@ -392,4 +392,147 @@ func (e *Engine) resolveReconciledNodeSuccess(ctx context.Context, tx harnesssto
 	return nil
 }
 
+// ResolveReconciledRetry re-arms a NodeRun in IN_DOUBT state when provider
+// reconciliation has proved the effect was ABSENT or is safe to retry.
+// The new Attempt will reuse the same stable effect idempotency key.
+func (e *Engine) ResolveReconciledRetry(ctx context.Context, effectID harnessmodel.EffectIntentID, delay time.Duration) (harnessmodel.NodeRun, error) {
+	if effectID == "" {
+		return harnessmodel.NodeRun{}, fmt.Errorf("effect id is required")
+	}
+	now := e.now().UTC()
+	var result harnessmodel.NodeRun
+	err := e.store.Update(ctx, func(tx harnessstore.Tx) error {
+		intent, err := tx.GetEffectIntent(ctx, effectID)
+		if err != nil {
+			return err
+		}
+		if intent.State != harnessmodel.EffectFailed && intent.State != harnessmodel.EffectInDoubt {
+			return fmt.Errorf("effect %s must be FAILED or IN_DOUBT to re-arm retry, got %s", intent.ID, intent.State)
+		}
+		if intent.State == harnessmodel.EffectFailed && intent.ErrorClass != effectAbsentClass && !intent.Class.BlindRetrySafe() {
+			return fmt.Errorf("effect %s failed with non-retryable class %s", intent.ID, intent.ErrorClass)
+		}
+		nr, err := tx.GetNodeRun(ctx, intent.NodeRunID)
+		if err != nil {
+			return err
+		}
+		if nr.State != harnessmodel.NodeInDoubt {
+			return fmt.Errorf("node %s is in state %s, not IN_DOUBT", nr.ID, nr.State)
+		}
+		run, err := tx.GetWorkflowRun(ctx, intent.WorkflowRunID)
+		if err != nil {
+			return err
+		}
+		if run.State != harnessmodel.WorkflowRunning && run.State != harnessmodel.WorkflowPausing && run.State != harnessmodel.WorkflowPaused {
+			return fmt.Errorf("cannot retry node %s while workflow %s is %s", nr.ID, run.ID, run.State)
+		}
+
+		errClass := harnessmodel.ErrorClass(intent.ErrorClass)
+		if !errClass.Valid() {
+			errClass = harnessmodel.ErrorApplicationTransient
+		}
+		if delay > 0 {
+			if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeRetryWait, now); err != nil {
+				return err
+			}
+			sched := harnessmodel.RetrySchedule{
+				NodeRunID:       nr.ID,
+				WorkflowRunID:   run.ID,
+				FailedAttemptID: intent.LastAttemptID,
+				AttemptNumber:   1,
+				FailureClass:    errClass,
+				ScheduledAt:     now,
+				NotBefore:       now.Add(delay),
+			}
+			if err := tx.CreateRetrySchedule(ctx, sched); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeRetryScheduled", "node_run", string(nr.ID), map[string]any{
+				"nodeId": nr.NodeID, "notBefore": sched.NotBefore, "reconciledEffectId": intent.ID,
+			}); err != nil {
+				return err
+			}
+		} else {
+			if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeRetryWait, now); err != nil {
+				return err
+			}
+			if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeReady, now); err != nil {
+				return err
+			}
+			if err := tx.EnqueueReadyNode(ctx, nr.ID, now, time.Time{}, ""); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeReady", "node_run", string(nr.ID), map[string]any{
+				"nodeId": nr.NodeID, "reconciledEffectId": intent.ID,
+			}); err != nil {
+				return err
+			}
+		}
+		result = nr
+		return nil
+	})
+	return result, err
+}
+
+// ResolveReconciledFailure transitions an IN_DOUBT node to FAILED when reconciliation
+// confirms failure or manual decision rejects execution.
+func (e *Engine) ResolveReconciledFailure(ctx context.Context, effectID harnessmodel.EffectIntentID, errorClass, errorMessage string) (harnessmodel.NodeRun, error) {
+	if effectID == "" || strings.TrimSpace(errorClass) == "" {
+		return harnessmodel.NodeRun{}, fmt.Errorf("effect id and error class are required")
+	}
+	now := e.now().UTC()
+	var result harnessmodel.NodeRun
+	err := e.store.Update(ctx, func(tx harnessstore.Tx) error {
+		intent, err := tx.GetEffectIntent(ctx, effectID)
+		if err != nil {
+			return err
+		}
+		nr, err := tx.GetNodeRun(ctx, intent.NodeRunID)
+		if err != nil {
+			return err
+		}
+		if nr.State != harnessmodel.NodeInDoubt {
+			return fmt.Errorf("node %s is in state %s, not IN_DOUBT", nr.ID, nr.State)
+		}
+		run, err := tx.GetWorkflowRun(ctx, intent.WorkflowRunID)
+		if err != nil {
+			return err
+		}
+		if intent.State == harnessmodel.EffectInDoubt {
+			intent.State = harnessmodel.EffectFailed
+			intent.ResolvedAt = now
+			intent.ErrorClass = strings.TrimSpace(errorClass)
+			intent.ErrorMessage = errorMessage
+			if err := tx.CompareAndSwapEffectIntent(ctx, harnessmodel.EffectInDoubt, intent); err != nil {
+				return err
+			}
+		}
+		if err := transitionNode(ctx, tx, &nr, harnessmodel.NodeFailed, now); err != nil {
+			return err
+		}
+		progress, err := tx.IncrementWorkflowProgress(ctx, run.ID, true, now)
+		if err != nil {
+			return err
+		}
+		if _, err := e.appendEvent(ctx, tx, run.ID, now, "NodeFailed", "node_run", string(nr.ID), map[string]any{
+			"nodeId": nr.NodeID, "errorClass": errorClass, "error": errorMessage, "reconciledEffectId": intent.ID,
+		}); err != nil {
+			return err
+		}
+		if progress.TerminalNodes == progress.TotalNodes && (run.State == harnessmodel.WorkflowRunning || run.State == harnessmodel.WorkflowPausing || run.State == harnessmodel.WorkflowPaused) {
+			if err := transitionWorkflow(ctx, tx, &run, harnessmodel.WorkflowFailed, now); err != nil {
+				return err
+			}
+			if _, err := e.appendEvent(ctx, tx, run.ID, now, "WorkflowFailed", "workflow_run", string(run.ID), map[string]any{
+				"failedNodes": progress.FailedNodes, "totalNodes": progress.TotalNodes, "reconciledEffectId": intent.ID,
+			}); err != nil {
+				return err
+			}
+		}
+		result = nr
+		return nil
+	})
+	return result, err
+}
+
 var _ = errors.Is

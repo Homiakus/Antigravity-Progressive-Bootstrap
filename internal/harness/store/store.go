@@ -62,6 +62,17 @@ type Reader interface {
 	GetEffectIntentByKey(context.Context, string) (harnessmodel.EffectIntent, error)
 	ListUncertainEffects(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.EffectIntent, error)
 	ListEffectIntentsByAttempt(context.Context, harnessmodel.AttemptID, int) ([]harnessmodel.EffectIntent, error)
+	GetArtifact(context.Context, harnessmodel.ArtifactID) (harnessmodel.ArtifactMetadata, error)
+	ListArtifactsByRun(context.Context, harnessmodel.WorkflowRunID, int) ([]harnessmodel.ArtifactMetadata, error)
+	ListArtifactsByDigest(context.Context, string) ([]harnessmodel.ArtifactMetadata, error)
+	ListArtifactProvenance(context.Context, harnessmodel.NodeRunID) ([]harnessmodel.ProvenanceEdge, error)
+	ListAllArtifactDigests(context.Context) (map[string]struct{}, error)
+	GetNodeCacheEntry(context.Context, string) (harnessmodel.NodeCacheEntry, error)
+	ListNodeCacheEntriesByRun(context.Context, harnessmodel.WorkflowRunID) ([]harnessmodel.NodeCacheEntry, error)
+	GetWorkspace(context.Context, harnessmodel.WorkspaceID) (harnessmodel.WorkspaceRecord, error)
+	ListWorkspacesByOwner(context.Context, harnessmodel.WorkflowRunID) ([]harnessmodel.WorkspaceRecord, error)
+	ListWorkspacesByRepo(context.Context, string) ([]harnessmodel.WorkspaceRecord, error)
+	ListActiveWorkspaces(context.Context) ([]harnessmodel.WorkspaceRecord, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -106,6 +117,20 @@ type Tx interface {
 	PutEffectIntent(context.Context, harnessmodel.EffectIntent) (harnessmodel.EffectIntent, bool, error)
 	CompareAndSwapEffectIntent(context.Context, harnessmodel.EffectState, harnessmodel.EffectIntent) error
 	RecordEffectReconciliation(context.Context, harnessmodel.EffectIntentID, harnessmodel.EffectState, time.Time) (harnessmodel.EffectIntent, error)
+	CreateArtifact(context.Context, harnessmodel.ArtifactMetadata) error
+	RecordProvenance(context.Context, harnessmodel.ProvenanceEdge) error
+	DeleteArtifact(context.Context, harnessmodel.ArtifactID) error
+	PutNodeCacheEntry(context.Context, harnessmodel.NodeCacheEntry) error
+	TouchNodeCacheHit(context.Context, string, time.Time) error
+	DeleteNodeCacheEntry(context.Context, string) error
+	EvictNodeCacheEntries(context.Context, time.Time) (int, error)
+	CreateWorkspace(context.Context, harnessmodel.WorkspaceRecord) error
+	UpdateWorkspaceState(context.Context, harnessmodel.WorkspaceID, harnessmodel.WorkspaceState, time.Time) error
+	DeleteWorkspace(context.Context, harnessmodel.WorkspaceID) error
+	AddWorkflowNode(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeSpec) error
+	AddWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
+	RemoveWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
+	UpdateWorkflowProgressTotalNodes(context.Context, harnessmodel.WorkflowRunID, int) error
 	CancelWorkflowRuntime(context.Context, harnessmodel.WorkflowRunID, time.Time) (WorkflowCancellationStats, error)
 	AppendEvent(context.Context, events.Event, *events.OutboxMessage) (events.Event, error)
 }

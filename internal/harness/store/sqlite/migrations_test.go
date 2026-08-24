@@ -14,6 +14,7 @@ var currentHarnessTables = []string{
 	"workflow_progress", "ready_queue", "workflow_schedule_state", "workers", "leases",
 	"retry_schedule", "retry_schedule_history", "retry_budgets", "circuit_breakers",
 	"timers", "signals", "signal_waits", "approvals", "effect_intents", "effect_attempt_bindings",
+	"artifacts", "artifact_provenance", "node_cache_entries", "workspaces",
 }
 
 func assertCurrentSchema(t *testing.T, ctx context.Context, db *DB) {
@@ -129,7 +130,7 @@ func openFixtureAtVersion(t *testing.T, path string, version int) {
 }
 
 func TestUpgradeFromHistoricalFixtures(t *testing.T) {
-	for _, fromVersion := range []int{0, 1, 2, 3, 4, 5, 6} {
+	for _, fromVersion := range []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9} {
 		t.Run("v"+string(rune('0'+fromVersion)), func(t *testing.T) {
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "state.db")
@@ -208,6 +209,57 @@ func TestVersionSixToSevenCreatesEffectConstraints(t *testing.T) {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v7 index %s: %v", name, err)
+		}
+	}
+}
+
+func TestVersionSevenToEightCreatesArtifactConstraints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	openFixtureAtVersion(t, path, 7)
+	db, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"artifacts_by_workflow", "artifacts_by_digest", "artifacts_by_producer_node", "artifact_provenance_by_node"} {
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
+			t.Fatalf("missing v8 index %s: %v", name, err)
+		}
+	}
+}
+
+func TestVersionEightToNineCreatesNodeCacheConstraints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	openFixtureAtVersion(t, path, 8)
+	db, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"node_cache_by_run", "node_cache_by_last_hit"} {
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
+			t.Fatalf("missing v9 index %s: %v", name, err)
+		}
+	}
+}
+
+func TestVersionNineToTenCreatesWorkspaceConstraints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "state.db")
+	openFixtureAtVersion(t, path, 9)
+	db, err := Open(ctx, path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"workspaces_by_owner", "workspaces_by_repo", "workspaces_by_state"} {
+		var got string
+		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got); err != nil {
+			t.Fatalf("missing v10 index %s: %v", name, err)
 		}
 	}
 }
