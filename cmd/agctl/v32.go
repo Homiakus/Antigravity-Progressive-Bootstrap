@@ -6,13 +6,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/homiakus/agctl/internal/dashboard"
 	"github.com/homiakus/agctl/internal/model"
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/planner"
 	"github.com/homiakus/agctl/internal/replan"
 	"github.com/homiakus/agctl/internal/securityaudit"
 	"github.com/homiakus/agctl/internal/tasks"
+	"github.com/homiakus/agctl/internal/web"
 )
 
 func runPlan(p paths.Paths, args []string) error {
@@ -133,21 +133,19 @@ func runSecurity(p paths.Paths, args []string) error {
 }
 
 func runDashboard(p paths.Paths, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: agctl dashboard serve [--listen 127.0.0.1:8787] [--workspace PATH]")
-	}
-	if args[0] != "serve" {
-		return fmt.Errorf("unknown dashboard command %q", args[0])
-	}
-	fs := flag.NewFlagSet("dashboard serve", flag.ContinueOnError)
+	fs := flag.NewFlagSet("dashboard", flag.ContinueOnError)
 	listen := fs.String("listen", "127.0.0.1:8787", "listen address")
 	workspace := fs.String("workspace", "", "workspace for security/capability context")
+	noBrowser := fs.Bool("no-browser", false, "do not open browser automatically")
 	allowRemote := fs.Bool("allow-remote", false, "allow binding to a non-loopback address")
-	if err := fs.Parse(args[1:]); err != nil {
+	if len(args) > 0 && args[0] == "serve" {
+		args = args[1:]
+	}
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *workspace == "" {
 		*workspace, _ = os.Getwd()
 	}
-	return dashboard.Serve(p, *workspace, *listen, *allowRemote)
+	return web.Serve(p, *workspace, *listen, !*noBrowser, *allowRemote)
 }

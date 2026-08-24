@@ -66,9 +66,23 @@ func RunAdvanced(p paths.Paths, workspace string, probeMCP bool) Report {
 		}
 	}
 
+	// Multi-platform environment diagnostics
+	r.add("OK", "platform", fmt.Sprintf("active platform: %s", p.ActivePlatform))
+	for _, info := range p.GetPlatformInfos() {
+		status := "available"
+		if info.Active {
+			status = "ACTIVE"
+		}
+		if _, err := os.Stat(info.ConfigDir); err == nil {
+			r.add("OK", "platform", fmt.Sprintf("%s (%s): %s at %s", info.Label, info.Platform, status, info.ConfigDir))
+		}
+	}
+
 	checkJSON := func(area, path string) {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			r.add("WARN", area, "missing: "+path)
+			if p.ActivePlatform == paths.PlatformAntigravity || area == "loop" || area == "router" {
+				r.add("WARN", area, "missing: "+path)
+			}
 			return
 		}
 		var v any
@@ -94,15 +108,16 @@ func RunAdvanced(p paths.Paths, workspace string, probeMCP bool) Report {
 	checkJSON("router", p.RouterConfig)
 	checkJSON("loop", p.LoopConfig)
 
+	ruleName := filepath.Base(p.GlobalRule)
 	if b, err := os.ReadFile(p.GlobalRule); err == nil {
 		n := len([]rune(string(b)))
 		if n > 12000 {
-			r.add("WARN", "rules", fmt.Sprintf("GEMINI.md %d/12000 chars; exceeds documented per-file limit", n))
+			r.add("WARN", "rules", fmt.Sprintf("%s %d/12000 chars; exceeds documented per-file limit", ruleName, n))
 		} else {
-			r.add("OK", "rules", fmt.Sprintf("GEMINI.md %d/12000 chars", n))
+			r.add("OK", "rules", fmt.Sprintf("%s %d/12000 chars", ruleName, n))
 		}
 	} else {
-		r.add("WARN", "rules", "global GEMINI.md missing")
+		r.add("WARN", "rules", fmt.Sprintf("global rule file missing: %s", p.GlobalRule))
 	}
 
 	rcfg, err := router.Load(p)
@@ -123,7 +138,7 @@ func RunAdvanced(p paths.Paths, workspace string, probeMCP bool) Report {
 		for _, name := range []string{hooks.RouterHookName, hooks.LoopHookName, hooks.ToolHookName} {
 			if _, ok := rawHooks[name]; ok {
 				r.add("OK", "hooks", name+" present")
-			} else {
+			} else if p.ActivePlatform == paths.PlatformAntigravity {
 				r.add("WARN", "hooks", name+" missing")
 			}
 		}
@@ -140,7 +155,7 @@ func RunAdvanced(p paths.Paths, workspace string, probeMCP bool) Report {
 				r.add("OK", "hooks-cli", "agctl-control-plane registered in AGY plugin registry")
 			}
 		}
-	} else if execx.Exists("agy") {
+	} else if execx.Exists("agy") && p.ActivePlatform == paths.PlatformAntigravity {
 		r.add("WARN", "hooks-cli", "managed CLI hook plugin missing; headless AGY tasks may not receive agctl lifecycle hooks")
 	}
 

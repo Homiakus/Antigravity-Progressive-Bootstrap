@@ -192,14 +192,14 @@ func writeAgentsMD(root string, p Profile) error {
 	}
 	var b strings.Builder
 	b.WriteString("# AGENTS.md\n\n")
-	b.WriteString("This repository is prepared for autonomous Antigravity development by agctl 3.2.1.\n\n")
+	b.WriteString("This repository is prepared for autonomous development by agctl (compatible with Antigravity IDE, DeepSeek Harness, Cursor Agent, Claude Code, Roo Code/Cline, OpenCode).\n\n")
 	b.WriteString("## Operating contract\n\n")
 	b.WriteString("- Inspect existing architecture and conventions before editing.\n")
 	b.WriteString("- Keep changes scoped to the delegated outcome.\n")
 	b.WriteString("- Prefer reversible, testable implementation choices when requirements leave room for engineering judgment.\n")
 	b.WriteString("- Do not stop at a plan or partial patch when implementation was requested.\n")
-	b.WriteString("- Use native Antigravity subagents for separable research, testing, review, or security work when the task is substantial.\n")
-	b.WriteString("- Use `/goal` semantics for delegated until-done implementation work.\n")
+	b.WriteString("- Follow the Autonomous Completion Loop: implement -> verify -> diagnose -> fix -> re-verify until Definition of Done.\n")
+	b.WriteString("- Use native subagents or specialist roles for separable research, testing, review, or security work when the task is substantial.\n")
 	b.WriteString("- Preserve secrets and never commit credentials.\n\n")
 	b.WriteString("## Verification\n\nUse the strongest relevant local checks. Suggested checks for the detected project profile:\n")
 	for _, x := range p.Checks {

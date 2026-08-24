@@ -1,0 +1,2664 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark" data-accent="blue" data-density="comfortable" data-motion="full" data-lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>agctl Web Control Plane</title>
+<!-- Immediate theme/accent boot script to eliminate FOUC / theme flash -->
+<script>
+  (function() {
+    try {
+      const t = localStorage.getItem("agctl_theme") || "dark";
+      const a = localStorage.getItem("agctl_accent") || "blue";
+      const d = localStorage.getItem("agctl_density") || "comfortable";
+      const m = localStorage.getItem("agctl_motion") || "full";
+      const l = localStorage.getItem("agctl_lang") || "ru";
+      const customHex = localStorage.getItem("agctl_accent_custom");
+
+      document.documentElement.setAttribute("data-theme", t);
+      document.documentElement.setAttribute("data-accent", a);
+      document.documentElement.setAttribute("data-density", d);
+      document.documentElement.setAttribute("data-motion", m);
+      document.documentElement.setAttribute("data-lang", l);
+
+      if (a === "custom" && customHex) {
+        document.documentElement.style.setProperty("--accent", customHex);
+      }
+    } catch(e) {}
+  })();
+</script>
+<style>
+/* ==========================================================================
+   1. DESIGN TOKENS & SYSTEM VARIABLES
+   ========================================================================== */
+:root {
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Motion System Tokens (Hierarchy: Instant -> Fast -> Base -> Medium -> Slow -> Scene) */
+  --motion-instant: 80ms;
+  --motion-fast: 150ms;
+  --motion-base: 220ms;
+  --motion-medium: 320ms;
+  --motion-slow: 480ms;
+  --motion-scene: 650ms;
+
+  /* Easing curves */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Shared Transitions */
+  --trans-micro: var(--motion-fast) var(--ease-out);
+  --trans-comp: var(--motion-base) var(--ease-out);
+  --trans-layout: var(--motion-medium) var(--ease-standard);
+
+  /* Base Radii */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 9999px;
+
+  /* Semantic Feedback Colors (Stable across themes) */
+  --color-success: #10b981;
+  --color-success-subtle: rgba(16, 185, 129, 0.14);
+  --color-success-border: rgba(16, 185, 129, 0.32);
+  --color-success-contrast: #ffffff;
+
+  --color-warning: #f59e0b;
+  --color-warning-subtle: rgba(245, 158, 11, 0.14);
+  --color-warning-border: rgba(245, 158, 11, 0.32);
+  --color-warning-contrast: #1c1917;
+
+  --color-danger: #ef4444;
+  --color-danger-subtle: rgba(239, 68, 68, 0.14);
+  --color-danger-border: rgba(239, 68, 68, 0.32);
+  --color-danger-contrast: #ffffff;
+
+  --color-info: #0284c7;
+  --color-info-subtle: rgba(2, 132, 199, 0.14);
+  --color-info-border: rgba(2, 132, 199, 0.32);
+  --color-info-contrast: #ffffff;
+
+  --color-purple: #8b5cf6;
+  --color-purple-subtle: rgba(139, 92, 246, 0.14);
+  --color-purple-border: rgba(139, 92, 246, 0.32);
+
+  /* Spacing Scale */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 14px;
+  --space-lg: 20px;
+  --space-xl: 28px;
+}
+
+/* ==========================================================================
+   2. THEMES (Dark, Slate, Cyber, Light)
+   ========================================================================== */
+
+/* DARK THEME (Default: Deep Graphite / Charcoal) */
+[data-theme="dark"] {
+  --surface-canvas: #090c13;
+  --surface-sidebar: #06080e;
+  --surface-header: #070a10;
+  --surface-card: #111622;
+  --surface-card-hover: #161d2d;
+  --surface-elevated: #1a2234;
+  --surface-input: #0d121c;
+  --surface-status-bar: #05070b;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-dim: #64748b;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.6);
+  --focus-ring-glow: rgba(56, 189, 248, 0.35);
+}
+
+/* SLATE THEME (Neo-Swiss Cool Slate) */
+[data-theme="slate"] {
+  --surface-canvas: #0f172a;
+  --surface-sidebar: #0a0f1d;
+  --surface-header: #0c1324;
+  --surface-card: #1e293b;
+  --surface-card-hover: #263349;
+  --surface-elevated: #2a3852;
+  --surface-input: #131c2d;
+  --surface-status-bar: #080d1a;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-dim: #64748b;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.13);
+  --border-strong: rgba(255, 255, 255, 0.22);
+
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.55);
+  --focus-ring-glow: rgba(14, 165, 233, 0.35);
+}
+
+/* CYBER THEME (Deep Obsidian with High-Contrast Precision) */
+[data-theme="cyber"] {
+  --surface-canvas: #04050a;
+  --surface-sidebar: #020306;
+  --surface-header: #030408;
+  --surface-card: #0c0e18;
+  --surface-card-hover: #141727;
+  --surface-elevated: #1a1e32;
+  --surface-input: #080a12;
+  --surface-status-bar: #010204;
+
+  --text-primary: #f0fdfa;
+  --text-secondary: #8da4b8;
+  --text-dim: #546a7e;
+  --text-on-accent: #020408;
+
+  --border-subtle: rgba(0, 255, 204, 0.10);
+  --border-default: rgba(0, 255, 204, 0.18);
+  --border-strong: rgba(0, 255, 204, 0.32);
+
+  --shadow-sm: 0 2px 8px rgba(0, 255, 204, 0.05);
+  --shadow-md: 0 8px 24px rgba(0, 255, 204, 0.08);
+  --shadow-lg: 0 16px 40px rgba(0, 255, 204, 0.12);
+  --focus-ring-glow: rgba(0, 255, 204, 0.4);
+}
+
+/* LIGHT THEME (Warm Paper / Crisp Off-White) */
+[data-theme="light"] {
+  --surface-canvas: #f8fafc;
+  --surface-sidebar: #f1f5f9;
+  --surface-header: #ffffff;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f8fafc;
+  --surface-elevated: #ffffff;
+  --surface-input: #eef2f6;
+  --surface-status-bar: #e2e8f0;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-dim: #94a3b8;
+  --text-on-accent: #ffffff;
+
+  --border-subtle: rgba(15, 23, 42, 0.06);
+  --border-default: rgba(15, 23, 42, 0.12);
+  --border-strong: rgba(15, 23, 42, 0.22);
+
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 6px 16px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 14px 28px rgba(15, 23, 42, 0.10);
+  --focus-ring-glow: rgba(2, 132, 199, 0.25);
+}
+
+/* SYSTEM THEME OVERRIDE (when data-theme="system") */
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] {
+    --surface-canvas: #f8fafc;
+    --surface-sidebar: #f1f5f9;
+    --surface-header: #ffffff;
+    --surface-card: #ffffff;
+    --surface-card-hover: #f8fafc;
+    --surface-elevated: #ffffff;
+    --surface-input: #eef2f6;
+    --surface-status-bar: #e2e8f0;
+
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-dim: #94a3b8;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: rgba(15, 23, 42, 0.06);
+    --border-default: rgba(15, 23, 42, 0.12);
+    --border-strong: rgba(15, 23, 42, 0.22);
+
+    --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 6px 16px rgba(15, 23, 42, 0.07);
+    --shadow-lg: 0 14px 28px rgba(15, 23, 42, 0.10);
+    --focus-ring-glow: rgba(2, 132, 199, 0.25);
+  }
+}
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --surface-canvas: #090c13;
+    --surface-sidebar: #06080e;
+    --surface-header: #070a10;
+    --surface-card: #111622;
+    --surface-card-hover: #161d2d;
+    --surface-elevated: #1a2234;
+    --surface-input: #0d121c;
+    --surface-status-bar: #05070b;
+
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-dim: #64748b;
+    --text-on-accent: #ffffff;
+
+    --border-subtle: rgba(255, 255, 255, 0.06);
+    --border-default: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.18);
+
+    --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.6);
+    --focus-ring-glow: rgba(56, 189, 248, 0.35);
+  }
+}
+
+/* ==========================================================================
+   3. ACCENT PRESET PALETTES (Curated 8-Color System)
+   ========================================================================== */
+/* 1. Blue (Default) */
+[data-accent="blue"] {
+  --accent: #38bdf8;
+  --accent-hover: #0284c7;
+  --accent-active: #0369a1;
+  --accent-subtle: rgba(56, 189, 248, 0.14);
+  --accent-border: rgba(56, 189, 248, 0.32);
+  --accent-glow: rgba(56, 189, 248, 0.28);
+  --accent-contrast: #031422;
+}
+/* 2. Cyan */
+[data-accent="cyan"] {
+  --accent: #06b6d4;
+  --accent-hover: #0891b2;
+  --accent-active: #0e7490;
+  --accent-subtle: rgba(6, 182, 212, 0.14);
+  --accent-border: rgba(6, 182, 212, 0.32);
+  --accent-glow: rgba(6, 182, 212, 0.28);
+  --accent-contrast: #041920;
+}
+/* 3. Teal */
+[data-accent="teal"] {
+  --accent: #14b8a6;
+  --accent-hover: #0d9488;
+  --accent-active: #0f766e;
+  --accent-subtle: rgba(20, 184, 166, 0.14);
+  --accent-border: rgba(20, 184, 166, 0.32);
+  --accent-glow: rgba(20, 184, 166, 0.28);
+  --accent-contrast: #041a17;
+}
+/* 4. Green (Emerald) */
+[data-accent="green"] {
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-active: #047857;
+  --accent-subtle: rgba(16, 185, 129, 0.14);
+  --accent-border: rgba(16, 185, 129, 0.32);
+  --accent-glow: rgba(16, 185, 129, 0.28);
+  --accent-contrast: #031710;
+}
+/* 5. Amber */
+[data-accent="amber"] {
+  --accent: #f59e0b;
+  --accent-hover: #d97706;
+  --accent-active: #b45309;
+  --accent-subtle: rgba(245, 158, 11, 0.14);
+  --accent-border: rgba(245, 158, 11, 0.32);
+  --accent-glow: rgba(245, 158, 11, 0.28);
+  --accent-contrast: #201402;
+}
+/* 6. Orange */
+[data-accent="orange"] {
+  --accent: #f97316;
+  --accent-hover: #ea580c;
+  --accent-active: #c2410c;
+  --accent-subtle: rgba(249, 115, 22, 0.14);
+  --accent-border: rgba(249, 115, 22, 0.32);
+  --accent-glow: rgba(249, 115, 22, 0.28);
+  --accent-contrast: #210d02;
+}
+/* 7. Purple (Amethyst) */
+[data-accent="purple"] {
+  --accent: #a855f7;
+  --accent-hover: #9333ea;
+  --accent-active: #7e22ce;
+  --accent-subtle: rgba(168, 85, 247, 0.14);
+  --accent-border: rgba(168, 85, 247, 0.32);
+  --accent-glow: rgba(168, 85, 247, 0.28);
+  --accent-contrast: #180527;
+}
+/* 8. Neutral (Steel) */
+[data-accent="neutral"] {
+  --accent: #94a3b8;
+  --accent-hover: #64748b;
+  --accent-active: #475569;
+  --accent-subtle: rgba(148, 163, 184, 0.14);
+  --accent-border: rgba(148, 163, 184, 0.32);
+  --accent-glow: rgba(148, 163, 184, 0.2);
+  --accent-contrast: #0f172a;
+}
+
+/* ==========================================================================
+   4. DENSITY & ACCESSIBILITY MODES
+   ========================================================================== */
+[data-density="compact"] {
+  --space-md: 10px;
+  --space-lg: 14px;
+  --space-xl: 18px;
+  font-size: 13px;
+}
+[data-density="compact"] .btn { padding: 4px 10px; font-size: 11px; }
+[data-density="compact"] .card { padding: 12px 14px; }
+[data-density="compact"] th, [data-density="compact"] td { padding: 7px 10px; }
+[data-density="compact"] .nav-item { padding: 6px 10px; font-size: 12px; }
+
+/* Reduced Motion Mode Support */
+@media (prefers-reduced-motion: reduce) {
+  :root, [data-motion="reduced"] {
+    --motion-instant: 0ms !important;
+    --motion-fast: 0ms !important;
+    --motion-base: 0ms !important;
+    --motion-medium: 0ms !important;
+    --motion-slow: 0ms !important;
+    --motion-scene: 0ms !important;
+    --trans-micro: none !important;
+    --trans-comp: none !important;
+    --trans-layout: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+[data-motion="reduced"] * {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ==========================================================================
+   5. BASE RESET & LAYOUT STRUCTURE
+   ========================================================================== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: background var(--trans-layout), color var(--trans-layout);
+}
+
+/* Accessible focus styling */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--focus-ring-glow);
+}
+
+/* SVG Icon Helper Styles */
+.icon {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.8;
+  stroke: currentColor;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+  transition: transform var(--trans-micro), stroke var(--trans-micro);
+}
+.icon-sm { width: 14px; height: 14px; }
+.icon-lg { width: 20px; height: 20px; }
+
+/* ==========================================================================
+   6. HEADER & GLOBAL BAR
+   ========================================================================== */
+header {
+  height: 54px;
+  background: var(--surface-header);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  user-select: none;
+  z-index: 30;
+  transition: background var(--trans-layout), border-color var(--trans-layout);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, var(--accent), var(--color-purple));
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 13px;
+  box-shadow: 0 0 12px var(--accent-glow);
+  transition: transform var(--trans-micro);
+}
+.brand-logo:hover { transform: scale(1.05); }
+
+/* Live Status Indicator Badge */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+  transition: background var(--trans-micro), border-color var(--trans-micro), color var(--trans-micro);
+}
+.status-pill.offline {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+.status-pill.connecting {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  animation: pulseDot 2.4s ease-in-out infinite;
+}
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   7. INTERACTIVE BUTTONS & FEEDBACK LIFECYCLE
+   ========================================================================== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border-default);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  transition: background var(--trans-micro), border-color var(--trans-micro), transform var(--trans-micro), box-shadow var(--trans-micro);
+  outline: none;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+}
+.btn:hover {
+  background: var(--surface-card-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.btn:active {
+  transform: scale(0.98);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-contrast);
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  color: #fff;
+  box-shadow: 0 4px 14px var(--accent-glow);
+}
+.btn-primary:active {
+  background: var(--accent-active);
+}
+.btn-success { background: var(--color-success); color: #fff; border: none; }
+.btn-success:hover { filter: brightness(1.1); }
+.btn-danger { background: var(--color-danger); color: #fff; border: none; }
+.btn-danger:hover { filter: brightness(1.1); }
+.btn-warning { background: var(--color-warning); color: #1c1917; border: none; }
+.btn-sm { padding: 4px 8px; font-size: 11px; }
+
+/* Button Loading & Success Action States */
+.btn.is-loading {
+  pointer-events: none;
+  opacity: 0.85;
+}
+.btn.is-loading .btn-icon {
+  animation: spin 0.8s linear infinite;
+}
+.btn.is-success {
+  background: var(--color-success) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.shortcut-hint {
+  padding: 2px 5px;
+  border-radius: var(--radius-xs);
+  background: var(--border-subtle);
+  border: 1px solid var(--border-default);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+
+/* ==========================================================================
+   8. APP LAYOUT, SIDEBAR & NAVIGATION
+   ========================================================================== */
+.app-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+sidebar {
+  width: 220px;
+  background: var(--surface-sidebar);
+  border-right: 1px solid var(--border-default);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 8px;
+  user-select: none;
+  overflow-y: auto;
+  transition: background var(--trans-layout), border-color var(--trans-layout);
+}
+.nav-group-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  padding: 10px 10px 4px;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--trans-micro), color var(--trans-micro), transform var(--trans-micro);
+  font-weight: 500;
+  margin-bottom: 2px;
+  position: relative;
+}
+.nav-item:hover {
+  color: var(--text-primary);
+  background: var(--surface-card);
+}
+.nav-item:active {
+  transform: scale(0.99);
+}
+.nav-item.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+  font-weight: 600;
+}
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+.nav-badge {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: var(--border-default);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ==========================================================================
+   9. MAIN CONTENT, TAB VIEWS & LEVEL 3 MOTION
+   ========================================================================== */
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  background: var(--surface-canvas);
+}
+
+.tab-view {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-lg);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--trans-comp), transform var(--trans-comp);
+}
+.tab-view.active {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Grid Layouts */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+
+/* Cards */
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--trans-micro), box-shadow var(--trans-micro), transform var(--trans-micro);
+}
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-primary);
+}
+.card-subtitle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metric-val {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.metric-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ==========================================================================
+   10. STATUS BADGES & INDICATORS (Color + Text + Icon)
+   ========================================================================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid transparent;
+}
+.badge-pass, .badge-succeeded {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.badge-warn, .badge-running {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+.badge-fail, .badge-failed {
+  background: var(--color-danger-subtle);
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+.badge-info, .badge-queued {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.badge-purple {
+  background: var(--color-purple-subtle);
+  color: var(--color-purple);
+  border-color: var(--color-purple-border);
+}
+
+/* Attention pulse for active or warning elements */
+.badge-attention {
+  animation: badgePulse 1.6s ease-in-out infinite;
+}
+@keyframes badgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* ==========================================================================
+   11. PROGRESS BARS & SKELETON LOADERS
+   ========================================================================== */
+.progress-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: var(--border-subtle);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  position: relative;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+  transition: width var(--trans-comp);
+}
+.progress-bar-indeterminate {
+  width: 40%;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: indeterminateProgress 1.4s infinite cubic-bezier(0.65, 0, 0.35, 1);
+}
+@keyframes indeterminateProgress {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, var(--border-subtle) 25%, var(--border-default) 50%, var(--border-subtle) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.8s infinite;
+  border-radius: var(--radius-xs);
+}
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ==========================================================================
+   12. TABLES & FORM CONTROLS
+   ========================================================================== */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+th {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border-default);
+}
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  transition: background var(--trans-micro);
+}
+tr:hover td { background: var(--border-subtle); }
+
+.input, select {
+  width: 100%;
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--trans-micro), box-shadow var(--trans-micro);
+}
+.input:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+/* Profile Selector Grid */
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+}
+.profile-btn {
+  padding: 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--trans-micro), background var(--trans-micro), box-shadow var(--trans-micro), transform var(--trans-micro);
+}
+.profile-btn:hover {
+  border-color: var(--accent);
+  background: var(--surface-card-hover);
+  transform: translateY(-1px);
+}
+.profile-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.profile-title {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.profile-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+/* Swatches for Accent Picker */
+.swatches-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.swatch-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform var(--trans-micro), border-color var(--trans-micro);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.swatch-btn:hover { transform: scale(1.12); }
+.swatch-btn.active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 8px currentColor;
+}
+.swatch-btn .icon { width: 14px; height: 14px; opacity: 0; }
+.swatch-btn.active .icon { opacity: 1; }
+
+/* ==========================================================================
+   13. LIVE TERMINAL CONSOLE
+   ========================================================================== */
+.console-box {
+  background: #04060a;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  height: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.console-toolbar {
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.console-logs {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-line {
+  line-height: 1.5;
+  display: flex;
+  gap: 8px;
+  animation: logLineIn var(--motion-fast) var(--ease-out);
+}
+@keyframes logLineIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.log-time { color: var(--text-dim); }
+.log-src { color: var(--accent); font-weight: 600; min-width: 65px; }
+.log-INFO .log-lvl { color: #38bdf8; font-weight: 700; }
+.log-WARN .log-lvl { color: #f59e0b; font-weight: 700; }
+.log-ERROR .log-lvl { color: #ef4444; font-weight: 700; }
+.log-EVENT .log-lvl { color: #a855f7; font-weight: 700; }
+
+/* ==========================================================================
+   14. BOTTOM PERSISTENT STATUS BAR
+   ========================================================================== */
+.status-bar {
+  height: 28px;
+  background: var(--surface-status-bar);
+  border-top: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+  z-index: 25;
+}
+.status-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-bar-item strong {
+  color: var(--text-primary);
+}
+
+/* ==========================================================================
+   15. MODALS & COMMAND PALETTE (Level 2 Motion)
+   ========================================================================== */
+.modal-backdrop, .palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 150;
+  opacity: 0;
+  transition: opacity var(--trans-comp);
+}
+.modal-backdrop.active, .palette-backdrop.active {
+  display: flex;
+  opacity: 1;
+}
+.modal-box, .palette-box {
+  background: var(--surface-card);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 520px;
+  padding: 22px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transform: scale(0.96);
+  transition: transform var(--trans-comp);
+}
+.modal-backdrop.active .modal-box, .palette-backdrop.active .palette-box {
+  transform: scale(1);
+}
+
+.palette-backdrop {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+.palette-box {
+  max-width: 560px;
+  padding: 0;
+  overflow: hidden;
+}
+.palette-input {
+  width: 100%;
+  padding: 14px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-default);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+}
+.palette-items {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.palette-item {
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--trans-micro), color var(--trans-micro);
+}
+.palette-item:hover, .palette-item.active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+/* ==========================================================================
+   16. TOAST NOTIFICATION SYSTEM
+   ========================================================================== */
+#toast-container {
+  position: fixed;
+  bottom: 38px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  padding: 10px 14px;
+  background: var(--surface-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-lg);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  animation: toastSlideIn var(--motion-fast) var(--ease-out);
+  max-width: 360px;
+}
+.toast-success { border-color: var(--color-success-border); }
+.toast-error { border-color: var(--color-danger-border); }
+.toast-warning { border-color: var(--color-warning-border); }
+.toast-info { border-color: var(--accent-border); }
+
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateX(30px) scale(0.95); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+</style>
+</head>
+<body>
+
+<!-- SVG SYMBOL SPRITE FOR CLEAN STROKE ICONS -->
+<svg style="display:none;">
+  <symbol id="icon-dash" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></symbol>
+  <symbol id="icon-doctor" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="icon-caps" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+  <symbol id="icon-loop" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="icon-gov" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+  <symbol id="icon-console" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></symbol>
+  <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="icon-sync" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></symbol>
+  <symbol id="icon-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+  <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+  <symbol id="icon-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></symbol>
+  <symbol id="icon-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="icon-play" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></symbol>
+  <symbol id="icon-stop" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></symbol>
+</svg>
+
+<!-- 1. HEADER -->
+<header>
+  <div class="brand">
+    <div class="brand-logo">ag</div>
+    <span>agctl Web Control Plane</span>
+    <span class="status-pill" id="header-sse-pill">
+      <span class="status-dot"></span>
+      <span id="header-sse-label" data-i18n="header_live">LIVE SSE</span>
+    </span>
+  </div>
+
+  <div class="header-actions">
+    <button class="btn btn-sm" id="btn-doc-quick" onclick="triggerAction('doctor', this)">
+      <svg class="icon btn-icon"><use href="#icon-doctor"/></svg>
+      <span data-i18n="btn_doctor">Doctor</span>
+    </button>
+    <button class="btn btn-sm" id="btn-sync-quick" onclick="triggerAction('sync_rec', this)">
+      <svg class="icon btn-icon"><use href="#icon-sync"/></svg>
+      <span data-i18n="btn_sync">Sync Skills</span>
+    </button>
+    <button class="btn btn-sm btn-primary" onclick="openNewTaskModal()">
+      <svg class="icon"><use href="#icon-plus"/></svg>
+      <span data-i18n="btn_new_task">New Task</span>
+    </button>
+
+    <button class="btn btn-sm" onclick="togglePalette()" title="Command Palette (Ctrl+K)">
+      <svg class="icon"><use href="#icon-search"/></svg>
+      <span class="shortcut-hint">Ctrl+K</span>
+    </button>
+
+    <select id="lang-select" onchange="setLang(this.value)" style="width:auto; padding:4px 8px; font-size:11px;">
+      <option value="ru">🇷🇺 RU</option>
+      <option value="en">🇬🇧 EN</option>
+    </select>
+
+    <select id="theme-select" onchange="setTheme(this.value)" style="width:auto; padding:4px 8px; font-size:11px;">
+      <option value="dark">🌙 Dark</option>
+      <option value="slate">🌑 Slate</option>
+      <option value="cyber">⚡ Cyber</option>
+      <option value="light">☀️ Light</option>
+      <option value="system">🖥️ System</option>
+    </select>
+  </div>
+</header>
+
+<!-- 2. APP WORKSPACE -->
+<div class="app-container">
+  <!-- SIDEBAR -->
+  <sidebar>
+    <div class="nav-group-title" data-i18n="nav_group_main">Управление</div>
+    <div class="nav-item active" onclick="showTab('dashboard')" data-tab="dashboard">
+      <svg class="icon"><use href="#icon-dash"/></svg>
+      <span data-i18n="nav_dashboard">Обзор (Dashboard)</span>
+    </div>
+    <div class="nav-item" onclick="showTab('doctor')" data-tab="doctor">
+      <svg class="icon"><use href="#icon-doctor"/></svg>
+      <span data-i18n="nav_doctor">Setup & Doctor</span>
+      <span class="nav-badge" id="sidebar-doc-badge">PASS</span>
+    </div>
+    <div class="nav-item" onclick="showTab('capabilities')" data-tab="capabilities">
+      <svg class="icon"><use href="#icon-caps"/></svg>
+      <span data-i18n="nav_capabilities">Возможности & MCP</span>
+      <span class="nav-badge" id="sidebar-caps-badge">0</span>
+    </div>
+    <div class="nav-item" onclick="showTab('autonomy')" data-tab="autonomy">
+      <svg class="icon"><use href="#icon-loop"/></svg>
+      <span data-i18n="nav_autonomy">Автономия & Loop</span>
+      <span class="nav-badge" id="sidebar-loop-badge">deep</span>
+    </div>
+    <div class="nav-item" onclick="showTab('governance')" data-tab="governance">
+      <svg class="icon"><use href="#icon-gov"/></svg>
+      <span data-i18n="nav_governance">Безопасность & Ops</span>
+    </div>
+
+    <div class="nav-group-title" data-i18n="nav_group_system">Система</div>
+    <div class="nav-item" onclick="showTab('console')" data-tab="console">
+      <svg class="icon"><use href="#icon-console"/></svg>
+      <span data-i18n="nav_console">Живая Консоль</span>
+      <span class="nav-badge" style="background:var(--accent-subtle); color:var(--accent);">LIVE</span>
+    </div>
+    <div class="nav-item" onclick="showTab('settings')" data-tab="settings">
+      <svg class="icon"><use href="#icon-settings"/></svg>
+      <span data-i18n="nav_settings">Настройки & UI</span>
+    </div>
+  </sidebar>
+
+  <!-- MAIN TAB CONTENT -->
+  <main>
+    <!-- TAB 1: DASHBOARD -->
+    <div id="tab-dashboard" class="tab-view active">
+      <div class="grid-4">
+        <div class="card metric-card">
+          <div class="metric-lbl" data-i18n="dash_health_title">Здоровье Системы (Doctor)</div>
+          <div class="metric-val" id="dash-health-val"><span class="badge badge-pass">PASS</span></div>
+          <div class="card-subtitle" id="dash-health-sub">0 ошибок, 0 предупреждений</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-lbl" data-i18n="dash_loop_title">Автономный Цикл (/agctl-loop)</div>
+          <div class="metric-val" id="dash-loop-val">deep</div>
+          <div class="card-subtitle" id="dash-loop-sub">50 макс. итераций (guarded)</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-lbl" data-i18n="dash_tasks_title">Очередь Задач</div>
+          <div class="metric-val" id="dash-tasks-val">0</div>
+          <div class="card-subtitle" id="dash-tasks-sub">0 в работе, 0 в очереди</div>
+        </div>
+        <div class="card metric-card">
+          <div class="metric-lbl" data-i18n="dash_caps_title">Скиллы & MCP</div>
+          <div class="metric-val" id="dash-caps-val">0 / 0</div>
+          <div class="card-subtitle" id="dash-caps-sub">Зарегистрировано</div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-loop"/></svg> <span data-i18n="dash_loop_config">Профиль Автономии Loop</span></div>
+              <div class="card-subtitle" data-i18n="dash_loop_desc">Быстрое переключение лимитов выполнения</div>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="showTab('autonomy')"><span data-i18n="btn_manage">Управление</span> →</button>
+          </div>
+          <div class="profile-grid">
+            <div class="profile-btn" onclick="setLoopProfile('standard')">
+              <div class="profile-title"><span>Standard</span> <span class="badge badge-info">25</span></div>
+              <div class="profile-desc" data-i18n="loop_prof_std_desc">25 шагов, строгие проверки</div>
+            </div>
+            <div class="profile-btn active" id="prof-deep-card" onclick="setLoopProfile('deep')">
+              <div class="profile-title"><span>Deep (Rec)</span> <span class="badge badge-pass">50</span></div>
+              <div class="profile-desc" data-i18n="loop_prof_deep_desc">50 шагов, рекомендовано</div>
+            </div>
+            <div class="profile-btn" onclick="setLoopProfile('until-done')">
+              <div class="profile-title"><span>Until Done</span> <span class="badge badge-warn">∞</span></div>
+              <div class="profile-desc" data-i18n="loop_prof_until_desc">До подтверждения DoD</div>
+            </div>
+            <div class="profile-btn" onclick="setLoopProfile('unrestricted')">
+              <div class="profile-title"><span>Unrestricted</span> <span class="badge badge-fail">YOLO</span></div>
+              <div class="profile-desc" data-i18n="loop_prof_unres_desc">Без ограничений (риск)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-doctor"/></svg> <span data-i18n="dash_quick_diag">Быстрая Диагностика</span></div>
+              <div class="card-subtitle" data-i18n="dash_diag_desc">Статус компонентов среды</div>
+            </div>
+            <button class="btn btn-sm" onclick="runDoctor(false)"><span data-i18n="btn_run_doctor">Запустить Doctor</span></button>
+          </div>
+          <div id="dash-findings-list" style="display:flex; flex-direction:column; gap:8px; max-height:160px; overflow-y:auto;">
+            <div style="color:var(--text-secondary); font-size:12px;">Запуск анализа среды...</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><svg class="icon"><use href="#icon-dash"/></svg> <span data-i18n="dash_recent_tasks">Последние Задачи</span></div>
+            <div class="card-subtitle" data-i18n="dash_tasks_desc">Активность очереди автономного исполнителя</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="openNewTaskModal()">
+            <svg class="icon"><use href="#icon-plus"/></svg> <span data-i18n="btn_add_task">Добавить задачу</span>
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th data-i18n="th_task">Задача</th>
+                <th data-i18n="th_status">Статус</th>
+                <th data-i18n="th_priority">Приоритет</th>
+                <th data-i18n="th_time">Создана</th>
+                <th data-i18n="th_actions">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="dash-tasks-table">
+              <tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">Нет задач в очереди</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: DOCTOR & SETUP -->
+    <div id="tab-doctor" class="tab-view">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-sync"/></svg> <span data-i18n="setup_install_title">Установка и Обновление</span></div>
+              <div class="card-subtitle" data-i18n="setup_install_desc">Развертывание пакетов, правил и хуков</div>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px;">
+            <button class="btn btn-primary" onclick="runInstall('recommended')">
+              ⚡ <span data-i18n="btn_install_rec">Рекомендованная установка (Recommended)</span>
+            </button>
+            <button class="btn" onclick="runInstall('full')">
+              📦 <span data-i18n="btn_install_full">Полная установка со всеми пакетами (Full)</span>
+            </button>
+            <button class="btn" onclick="runInstall('self')">
+              🔧 <span data-i18n="btn_install_self">Самоустановка бинарника и хуков (Self-Install)</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-doctor"/></svg> <span data-i18n="setup_doctor_title">Параметры Doctor</span></div>
+              <div class="card-subtitle" data-i18n="setup_doctor_desc">Глубокая проверка системы</div>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+              <input type="checkbox" id="doc-probe-mcp"> <span data-i18n="lbl_probe_mcp">Выполнять Live Probe для MCP серверов</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+              <input type="checkbox" id="doc-self-test"> <span data-i18n="lbl_self_test">Запустить самопроверку хуков (Self-test)</span>
+            </label>
+            <button class="btn btn-primary" onclick="runDoctor(true)">
+              <svg class="icon"><use href="#icon-doctor"/></svg> <span data-i18n="btn_run_full_doctor">Запустить полную диагностику</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><svg class="icon"><use href="#icon-dash"/></svg> <span data-i18n="doctor_findings_title">Результаты Диагностики</span></div>
+            <div class="card-subtitle" id="doctor-findings-summary">0 проверок выполнено</div>
+          </div>
+          <input type="text" id="doc-filter" placeholder="Фильтр результатов..." class="input" style="width:220px;" oninput="filterDoctorFindings(this.value)">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Уровень</th>
+                <th>Область</th>
+                <th>Сообщение</th>
+              </tr>
+            </thead>
+            <tbody id="doctor-findings-tbody">
+              <tr><td colspan="3" style="text-align:center; color:var(--text-secondary);">Нажмите «Запустить полную диагностику» для проверки</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: CAPABILITIES & MCP -->
+    <div id="tab-capabilities" class="tab-view">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-caps"/></svg> <span data-i18n="caps_skills_title">Скиллы (Agent Skills)</span></div>
+              <div class="card-subtitle" id="skills-count-sub">0 скиллов установлено</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn btn-sm btn-primary" onclick="syncSkills('sync-recommended')">⚡ Sync Rec</button>
+              <button class="btn btn-sm" onclick="syncSkills('install-embedded')">📦 Core</button>
+            </div>
+          </div>
+          <input type="text" id="skills-filter" placeholder="Поиск скилла..." class="input" style="margin-bottom:10px;" oninput="filterSkills(this.value)">
+          <div id="skills-list" style="display:flex; flex-direction:column; gap:6px; max-height:360px; overflow-y:auto;">
+            <div style="color:var(--text-secondary); font-size:12px;">Загрузка списка скиллов...</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-caps"/></svg> <span data-i18n="caps_mcp_title">MCP Серверы</span></div>
+              <div class="card-subtitle" id="mcp-count-sub">0 серверов настроено</div>
+            </div>
+            <button class="btn btn-sm" onclick="probeMCPServers()">🔍 Probe All</button>
+          </div>
+          <div style="display:flex; gap:8px; margin-bottom:10px;">
+            <select id="mcp-add-select" class="input" style="flex:1;">
+              <option value="context7">context7</option>
+              <option value="playwright">playwright</option>
+              <option value="chrome-devtools">chrome-devtools</option>
+              <option value="gopls">gopls-mcp-server</option>
+              <option value="memory">memory</option>
+              <option value="github">github</option>
+            </select>
+            <button class="btn btn-primary" onclick="addMCP()"><span data-i18n="btn_add">Добавить</span></button>
+          </div>
+          <div id="mcp-list" style="display:flex; flex-direction:column; gap:8px; max-height:320px; overflow-y:auto;">
+            <div style="color:var(--text-secondary); font-size:12px;">Загрузка MCP серверов...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: AUTONOMY & LOOP -->
+    <div id="tab-autonomy" class="tab-view">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><svg class="icon"><use href="#icon-loop"/></svg> <span data-i18n="auto_loop_title">Профиль Автономного Цикла (/agctl-loop)</span></div>
+            <div class="card-subtitle" data-i18n="auto_loop_desc">Автоматическое продолжение работы агента до достижения Definition of Done</div>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="disableLoop()"><span data-i18n="btn_disable_loop">Отключить Loop</span></button>
+        </div>
+        <div class="profile-grid">
+          <div class="profile-btn" id="loop-btn-standard" onclick="setLoopProfile('standard')">
+            <div class="profile-title"><span>Standard</span> <span class="badge badge-info">25 exec</span></div>
+            <div class="profile-desc">25 макс. итераций. Стандартный профиль с проверками.</div>
+          </div>
+          <div class="profile-btn" id="loop-btn-deep" onclick="setLoopProfile('deep')">
+            <div class="profile-title"><span>Deep (Recommended)</span> <span class="badge badge-pass">50 exec</span></div>
+            <div class="profile-desc">50 макс. итераций. Рекомендованный режим для сложных задач.</div>
+          </div>
+          <div class="profile-btn" id="loop-btn-until-done" onclick="setLoopProfile('until-done')">
+            <div class="profile-title"><span>Until Done</span> <span class="badge badge-warn">Unlimited</span></div>
+            <div class="profile-desc">Безлимитные итерации до верификации завершения задачи.</div>
+          </div>
+          <div class="profile-btn" id="loop-btn-unrestricted" onclick="setLoopProfile('unrestricted')">
+            <div class="profile-title"><span>Unrestricted</span> <span class="badge badge-fail">YOLO Risk</span></div>
+            <div class="profile-desc">Безлимитные итерации с отключенными подтверждениями прав.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title"><svg class="icon"><use href="#icon-dash"/></svg> <span data-i18n="auto_tasks_title">Очередь Автономных Задач (Task Queue)</span></div>
+            <div class="card-subtitle" data-i18n="auto_tasks_desc">Фоновое параллельное выполнение задач</div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="openNewTaskModal()">
+            <svg class="icon"><use href="#icon-plus"/></svg> <span data-i18n="btn_add_task">Новая задача</span>
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th data-i18n="th_task">Задача</th>
+                <th data-i18n="th_status">Статус</th>
+                <th data-i18n="th_priority">Приоритет</th>
+                <th data-i18n="th_actions">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="autonomy-tasks-tbody">
+              <tr><td colspan="5" style="text-align:center; color:var(--text-secondary);">Загрузка очереди задач...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: GOVERNANCE & SECURITY -->
+    <div id="tab-governance" class="tab-view">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-gov"/></svg> <span data-i18n="gov_security_title">Аудит Безопасности</span></div>
+              <div class="card-subtitle" data-i18n="gov_security_desc">Проверка рисков и утечек путей</div>
+            </div>
+            <button class="btn btn-sm" onclick="runSecurityAudit()"><span data-i18n="btn_run_audit">Сканировать</span></button>
+          </div>
+          <div id="security-report-box" style="font-size:13px; display:flex; flex-direction:column; gap:8px;">
+            <div style="color:var(--text-secondary);">Нажмите «Сканировать» для аудита безопасности</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title"><svg class="icon"><use href="#icon-sync"/></svg> <span data-i18n="gov_backups_title">Резервные Копии (Backups)</span></div>
+              <div class="card-subtitle" data-i18n="gov_backups_desc">Снимки конфигурации и правил</div>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="createBackupSnapshot()">
+              <svg class="icon"><use href="#icon-plus"/></svg> <span data-i18n="btn_create_snapshot">Создать снимок</span>
+            </button>
+          </div>
+          <div id="backups-list" style="display:flex; flex-direction:column; gap:6px; max-height:260px; overflow-y:auto;">
+            <div style="color:var(--text-secondary); font-size:12px;">Загрузка списка бэкапов...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 6: LIVE CONSOLE -->
+    <div id="tab-console" class="tab-view">
+      <div class="console-box">
+        <div class="console-toolbar">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <svg class="icon"><use href="#icon-console"/></svg>
+            <span style="font-weight:700; color:var(--text-primary);">LIVE TERMINAL LOG</span>
+            <span class="status-pill"><span class="status-dot"></span> SSE</span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-sm" onclick="filterLogs('ALL')">ALL</button>
+            <button class="btn btn-sm" onclick="filterLogs('INFO')">INFO</button>
+            <button class="btn btn-sm" onclick="filterLogs('WARN')">WARN</button>
+            <button class="btn btn-sm" onclick="filterLogs('ERROR')">ERROR</button>
+            <button class="btn btn-sm" onclick="filterLogs('EVENT')">EVENT</button>
+            <button class="btn btn-sm" onclick="clearLogs()">Clear</button>
+          </div>
+        </div>
+        <div class="console-logs" id="console-output"></div>
+      </div>
+    </div>
+
+    <!-- TAB 7: SETTINGS & APPEARANCE -->
+    <div id="tab-settings" class="tab-view">
+      <div class="grid-2" style="max-width:960px;">
+        <!-- Appearance Settings Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon"><use href="#icon-settings"/></svg>
+              <span>Внешний вид & Темизация (Appearance)</span>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:14px;">
+            <div>
+              <label style="font-weight:600; font-size:12px; margin-bottom:6px; display:block;" data-i18n="settings_theme">Тема оформления (Theme)</label>
+              <select id="settings-theme" class="input" onchange="setTheme(this.value)">
+                <option value="dark">🌙 Dark (Graphite Deep)</option>
+                <option value="slate">🌑 Slate (Neo-Swiss)</option>
+                <option value="cyber">⚡ Cyber (Obsidian Glow)</option>
+                <option value="light">☀️ Light (Warm Paper)</option>
+                <option value="system">🖥️ System (Auto OS sync)</option>
+              </select>
+            </div>
+
+            <div>
+              <label style="font-weight:600; font-size:12px; margin-bottom:8px; display:block;">Акцентный цвет (Accent Color)</label>
+              <div class="swatches-grid" id="accent-swatches">
+                <button class="swatch-btn" data-color="blue" style="background:#38bdf8;" title="Blue (Sky)" onclick="setAccent('blue')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="cyan" style="background:#06b6d4;" title="Cyan" onclick="setAccent('cyan')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="teal" style="background:#14b8a6;" title="Teal" onclick="setAccent('teal')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="green" style="background:#10b981;" title="Green (Emerald)" onclick="setAccent('green')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="amber" style="background:#f59e0b;" title="Amber (Solar)" onclick="setAccent('amber')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="orange" style="background:#f97316;" title="Orange" onclick="setAccent('orange')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="purple" style="background:#a855f7;" title="Purple (Amethyst)" onclick="setAccent('purple')"><svg class="icon"><use href="#icon-check"/></svg></button>
+                <button class="swatch-btn" data-color="neutral" style="background:#94a3b8;" title="Neutral (Steel)" onclick="setAccent('neutral')"><svg class="icon"><use href="#icon-check"/></svg></button>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="color" id="custom-accent-picker" style="width:36px; height:32px; border:none; background:transparent; cursor:pointer;" onchange="setCustomAccent(this.value)">
+              <input type="text" id="custom-accent-hex" placeholder="#38bdf8" class="input" style="width:110px;" onchange="setCustomAccent(this.value)">
+              <span style="font-size:11px; color:var(--text-dim);">Пользовательский Hex</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label style="font-weight:600; font-size:12px; margin-bottom:6px; display:block;">Плотность (Density)</label>
+                <select id="settings-density" class="input" onchange="setDensity(this.value)">
+                  <option value="comfortable">Comfortable</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-weight:600; font-size:12px; margin-bottom:6px; display:block;">Анимации (Motion)</label>
+                <select id="settings-motion" class="input" onchange="setMotion(this.value)">
+                  <option value="full">Full (Плавные)</option>
+                  <option value="reduced">Reduced (Минимум)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- General System Settings Card -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon"><use href="#icon-settings"/></svg>
+              <span data-i18n="settings_title">Параметры agctl Control Plane</span>
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:14px;">
+            <div>
+              <label style="font-weight:600; font-size:12px; margin-bottom:6px; display:block;" data-i18n="settings_lang">Язык интерфейса</label>
+              <select id="settings-lang" class="input" onchange="setLang(this.value)">
+                <option value="ru">Русский (RU)</option>
+                <option value="en">English (EN)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-weight:600; font-size:12px; margin-bottom:6px; display:block;" data-i18n="settings_refresh">Интервал автообновления</label>
+              <select id="settings-refresh" class="input" onchange="setRefreshInterval(this.value)">
+                <option value="3000">3 секунды</option>
+                <option value="5000" selected>5 секунд</option>
+                <option value="10000">10 секунд</option>
+                <option value="0">Вручную (отключено)</option>
+              </select>
+            </div>
+            <div style="padding:10px; background:var(--surface-input); border-radius:var(--radius-sm); border:1px solid var(--border-subtle); font-size:11px; color:var(--text-secondary);">
+              <strong>Hotkeys:</strong> <br>
+              <code>Ctrl+K</code> : Палитра команд <br>
+              <code>1-6</code> : Быстрое переключение вкладок <br>
+              <code>Esc</code> : Закрыть модальные окна
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- 3. BOTTOM STATUS BAR -->
+<div class="status-bar">
+  <div class="status-bar-group">
+    <div class="status-bar-item" id="sb-conn">
+      <span class="status-dot" style="width:6px; height:6px;"></span>
+      <span id="sb-conn-text">SSE: Connected</span>
+    </div>
+    <div class="status-bar-item">
+      <span>Sync:</span> <strong id="sb-sync-status">OK</strong>
+    </div>
+    <div class="status-bar-item">
+      <span>Loop:</span> <strong id="sb-loop-status">deep (50 exec)</strong>
+    </div>
+    <div class="status-bar-item">
+      <span>Tasks:</span> <strong id="sb-tasks-status">0 active, 0 queued</strong>
+    </div>
+  </div>
+
+  <div class="status-bar-group">
+    <div class="status-bar-item">
+      <span>Doctor:</span> <strong id="sb-doc-status" style="color:var(--color-success);">PASS</strong>
+    </div>
+    <div class="status-bar-item">
+      <span id="sb-version">v1.6.2</span>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: NEW TASK -->
+<div class="modal-backdrop" id="modal-task">
+  <div class="modal-box">
+    <div style="font-weight:700; font-size:15px; display:flex; align-items:center; gap:6px;">
+      <svg class="icon"><use href="#icon-plus"/></svg>
+      <span data-i18n="modal_new_task_title">Создать Автономную Задачу</span>
+    </div>
+    <div>
+      <label style="font-size:11px; font-weight:600; margin-bottom:4px; display:block;" data-i18n="modal_task_desc">Описание задачи</label>
+      <textarea id="modal-task-desc" class="input" style="height:70px; resize:vertical;" placeholder="Например: Провести аудит безопасности и исправить предупреждения"></textarea>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div>
+        <label style="font-size:11px; font-weight:600; margin-bottom:4px; display:block;" data-i18n="modal_task_pri">Приоритет</label>
+        <select id="modal-task-pri" class="input">
+          <option value="high">High (Высокий)</option>
+          <option value="normal" selected>Normal (Обычный)</option>
+          <option value="low">Low (Низкий)</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px; font-weight:600; margin-bottom:4px; display:block;" data-i18n="modal_task_kind">Тип</label>
+        <select id="modal-task-kind" class="input">
+          <option value="feature">Feature</option>
+          <option value="fix">Bug Fix</option>
+          <option value="audit">Audit</option>
+          <option value="refactor">Refactor</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:6px;">
+      <button class="btn" onclick="closeModal('modal-task')"><span data-i18n="btn_cancel">Отмена</span></button>
+      <button class="btn btn-primary" onclick="submitNewTask()"><span data-i18n="btn_create">Создать задачу</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- COMMAND PALETTE -->
+<div class="palette-backdrop" id="palette-backdrop" onclick="if(event.target===this) togglePalette()">
+  <div class="palette-box">
+    <input type="text" id="palette-input" class="palette-input" placeholder="Введите команду или раздел..." oninput="filterPalette(this.value)">
+    <div class="palette-items" id="palette-items"></div>
+  </div>
+</div>
+
+<!-- TOAST CONTAINER -->
+<div id="toast-container"></div>
+
+<!-- JAVASCRIPT CONTROLLER -->
+<script>
+const i18n = {
+  ru: {
+    header_live: "LIVE SSE",
+    btn_doctor: "Doctor",
+    btn_sync: "Sync Skills",
+    btn_new_task: "Новая задача",
+    nav_group_main: "Управление",
+    nav_dashboard: "Обзор (Dashboard)",
+    nav_doctor: "Setup & Doctor",
+    nav_capabilities: "Возможности & MCP",
+    nav_autonomy: "Автономия & Loop",
+    nav_governance: "Безопасность & Ops",
+    nav_group_system: "Система",
+    nav_console: "Живая Консоль",
+    nav_settings: "Настройки & UI",
+    dash_health_title: "Здоровье Системы (Doctor)",
+    dash_loop_title: "Автономный Цикл (/agctl-loop)",
+    dash_tasks_title: "Очередь Задач",
+    dash_caps_title: "Скиллы & MCP",
+    dash_loop_config: "Профиль Автономии Loop",
+    dash_loop_desc: "Быстрое переключение лимитов выполнения",
+    btn_manage: "Управление",
+    loop_prof_std_desc: "25 шагов, строгие проверки",
+    loop_prof_deep_desc: "50 шагов, рекомендовано",
+    loop_prof_until_desc: "До подтверждения DoD",
+    loop_prof_unres_desc: "Без ограничений (риск)",
+    dash_quick_diag: "Быстрая Диагностика",
+    dash_diag_desc: "Статус компонентов среды",
+    btn_run_doctor: "Запустить Doctor",
+    dash_recent_tasks: "Последние Задачи",
+    dash_tasks_desc: "Активность очереди автономного исполнителя",
+    btn_add_task: "Добавить задачу",
+    th_task: "Задача",
+    th_status: "Статус",
+    th_priority: "Приоритет",
+    th_time: "Создана",
+    th_actions: "Действия",
+    setup_install_title: "Установка и Обновление",
+    setup_install_desc: "Развертывание пакетов, правил и хуков",
+    btn_install_rec: "Рекомендованная установка (Recommended)",
+    btn_install_full: "Полная установка со всеми пакетами (Full)",
+    btn_install_self: "Самоустановка бинарника и хуков (Self-Install)",
+    setup_doctor_title: "Параметры Doctor",
+    setup_doctor_desc: "Глубокая проверка системы",
+    lbl_probe_mcp: "Выполнять Live Probe для MCP серверов",
+    lbl_self_test: "Запустить самопроверку хуков (Self-test)",
+    btn_run_full_doctor: "Запустить полную диагностику",
+    doctor_findings_title: "Результаты Диагностики",
+    caps_skills_title: "Скиллы (Agent Skills)",
+    caps_mcp_title: "MCP Серверы",
+    btn_add: "Добавить",
+    auto_loop_title: "Профиль Автономного Цикла (/agctl-loop)",
+    auto_loop_desc: "Автоматическое продолжение работы агента до достижения Definition of Done",
+    btn_disable_loop: "Отключить Loop",
+    auto_tasks_title: "Очередь Автономных Задач (Task Queue)",
+    auto_tasks_desc: "Фоновое параллельное выполнение задач",
+    gov_security_title: "Аудит Безопасности",
+    gov_security_desc: "Проверка рисков и утечек путей",
+    btn_run_audit: "Сканировать",
+    gov_backups_title: "Резервные Копии (Backups)",
+    gov_backups_desc: "Снимки конфигурации и правил",
+    btn_create_snapshot: "Создать снимок",
+    settings_title: "Параметры agctl Control Plane",
+    settings_lang: "Язык интерфейса",
+    settings_theme: "Тема оформления (Theme)",
+    settings_refresh: "Интервал автообновления",
+    modal_new_task_title: "Создать Автономную Задачу",
+    modal_task_desc: "Описание задачи",
+    modal_task_pri: "Приоритет",
+    modal_task_kind: "Тип",
+    btn_cancel: "Отмена",
+    btn_create: "Создать задачу"
+  },
+  en: {
+    header_live: "LIVE SSE",
+    btn_doctor: "Doctor",
+    btn_sync: "Sync Skills",
+    btn_new_task: "New Task",
+    nav_group_main: "Control",
+    nav_dashboard: "Overview (Dashboard)",
+    nav_doctor: "Setup & Doctor",
+    nav_capabilities: "Capabilities & MCP",
+    nav_autonomy: "Autonomy & Loop",
+    nav_governance: "Security & Governance",
+    nav_group_system: "System",
+    nav_console: "Live Console",
+    nav_settings: "Settings & UI",
+    dash_health_title: "System Health (Doctor)",
+    dash_loop_title: "Autonomous Loop (/agctl-loop)",
+    dash_tasks_title: "Task Queue",
+    dash_caps_title: "Skills & MCP",
+    dash_loop_config: "Loop Profile Config",
+    dash_loop_desc: "Fast execution limits switching",
+    btn_manage: "Manage",
+    loop_prof_std_desc: "25 steps, guarded checks",
+    loop_prof_deep_desc: "50 steps, recommended",
+    loop_prof_until_desc: "Until DoD is verified",
+    loop_prof_unres_desc: "Unrestricted (risk)",
+    dash_quick_diag: "Quick Diagnostics",
+    dash_diag_desc: "Environment components health",
+    btn_run_doctor: "Run Doctor",
+    dash_recent_tasks: "Recent Tasks",
+    dash_tasks_desc: "Autonomous executor queue stream",
+    btn_add_task: "Add Task",
+    th_task: "Task",
+    th_status: "Status",
+    th_priority: "Priority",
+    th_time: "Created",
+    th_actions: "Actions",
+    setup_install_title: "Install & Update",
+    setup_install_desc: "Deploy packages, rules and hooks",
+    btn_install_rec: "Recommended Install",
+    btn_install_full: "Full Install with all packages",
+    btn_install_self: "Self-install binary & hooks",
+    setup_doctor_title: "Doctor Settings",
+    setup_doctor_desc: "Deep environment diagnostics",
+    lbl_probe_mcp: "Perform Live Probe for MCP servers",
+    lbl_self_test: "Run hooks self-test",
+    btn_run_full_doctor: "Run Full Diagnostics",
+    doctor_findings_title: "Diagnostic Findings",
+    caps_skills_title: "Skills (Agent Skills)",
+    caps_mcp_title: "MCP Servers",
+    btn_add: "Add",
+    auto_loop_title: "Autonomous Completion Loop (/agctl-loop)",
+    auto_loop_desc: "Automatic continuation until verified Definition of Done",
+    btn_disable_loop: "Disable Loop",
+    auto_tasks_title: "Autonomous Task Queue",
+    auto_tasks_desc: "Background parallel execution",
+    gov_security_title: "Security Audit",
+    gov_security_desc: "Risk verification and path leak scan",
+    btn_run_audit: "Scan",
+    gov_backups_title: "Backups & Snapshots",
+    gov_backups_desc: "Configuration and rules snapshots",
+    btn_create_snapshot: "Create Snapshot",
+    settings_title: "agctl Control Plane Settings",
+    settings_lang: "Interface Language",
+    settings_theme: "Theme",
+    settings_refresh: "Auto-refresh Interval",
+    modal_new_task_title: "Create Autonomous Task",
+    modal_task_desc: "Task Description",
+    modal_task_pri: "Priority",
+    modal_task_kind: "Kind",
+    btn_cancel: "Cancel",
+    btn_create: "Create Task"
+  }
+};
+
+let currentLang = "ru";
+let allLogs = [];
+let logFilter = "ALL";
+let currentDoctorFindings = [];
+let allSkills = [];
+let refreshTimer = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  const savedTheme = localStorage.getItem("agctl_theme") || "dark";
+  const savedLang = localStorage.getItem("agctl_lang") || "ru";
+  const savedAccent = localStorage.getItem("agctl_accent") || "blue";
+  const savedDensity = localStorage.getItem("agctl_density") || "comfortable";
+  const savedMotion = localStorage.getItem("agctl_motion") || "full";
+
+  setTheme(savedTheme);
+  setLang(savedLang);
+  setAccent(savedAccent);
+  setDensity(savedDensity);
+  setMotion(savedMotion);
+
+  if (document.getElementById("theme-select")) document.getElementById("theme-select").value = savedTheme;
+  if (document.getElementById("settings-theme")) document.getElementById("settings-theme").value = savedTheme;
+  if (document.getElementById("lang-select")) document.getElementById("lang-select").value = savedLang;
+  if (document.getElementById("settings-lang")) document.getElementById("settings-lang").value = savedLang;
+  if (document.getElementById("settings-density")) document.getElementById("settings-density").value = savedDensity;
+  if (document.getElementById("settings-motion")) document.getElementById("settings-motion").value = savedMotion;
+
+  setupSSE();
+  fetchSnapshot();
+  setRefreshInterval(5000);
+  setupHotkeys();
+});
+
+// Internationalization
+function setLang(lang) {
+  currentLang = lang;
+  document.documentElement.setAttribute("data-lang", lang);
+  localStorage.setItem("agctl_lang", lang);
+  if (document.getElementById("lang-select")) document.getElementById("lang-select").value = lang;
+  if (document.getElementById("settings-lang")) document.getElementById("settings-lang").value = lang;
+
+  const dict = i18n[lang] || i18n.ru;
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    const key = el.getAttribute("data-i18n");
+    if (dict[key]) el.textContent = dict[key];
+  });
+}
+
+// Theme
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("agctl_theme", theme);
+  if (document.getElementById("theme-select")) document.getElementById("theme-select").value = theme;
+  if (document.getElementById("settings-theme")) document.getElementById("settings-theme").value = theme;
+}
+
+// Accent Color
+function setAccent(accent) {
+  document.documentElement.setAttribute("data-accent", accent);
+  localStorage.setItem("agctl_accent", accent);
+  document.querySelectorAll(".swatch-btn").forEach(btn => {
+    if (btn.getAttribute("data-color") === accent) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+}
+
+function setCustomAccent(hex) {
+  if (!hex || !hex.startsWith("#") || (hex.length !== 7 && hex.length !== 4)) return;
+  document.documentElement.style.setProperty("--accent", hex);
+  document.documentElement.style.setProperty("--accent-subtle", hex + "22");
+  document.documentElement.style.setProperty("--accent-border", hex + "4d");
+  document.documentElement.style.setProperty("--accent-glow", hex + "40");
+  document.documentElement.setAttribute("data-accent", "custom");
+  localStorage.setItem("agctl_accent", "custom");
+  localStorage.setItem("agctl_accent_custom", hex);
+  document.querySelectorAll(".swatch-btn").forEach(btn => btn.classList.remove("active"));
+  showToast(`Custom accent set to ${hex}`, "info");
+}
+
+function setDensity(density) {
+  document.documentElement.setAttribute("data-density", density);
+  localStorage.setItem("agctl_density", density);
+}
+
+function setMotion(motion) {
+  document.documentElement.setAttribute("data-motion", motion);
+  localStorage.setItem("agctl_motion", motion);
+}
+
+// Tab navigation with Level 3 smooth transition
+function showTab(tabId) {
+  document.querySelectorAll(".tab-view").forEach(el => el.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+
+  const target = document.getElementById("tab-" + tabId);
+  if (target) target.classList.add("active");
+
+  const navItem = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
+  if (navItem) navItem.classList.add("active");
+
+  if (tabId === "capabilities") fetchCapabilities();
+  if (tabId === "governance") fetchGovernance();
+}
+
+// Snapshot & Data Fetching
+async function fetchSnapshot() {
+  try {
+    const res = await fetch("/api/snapshot");
+    if (!res.ok) return;
+    const data = await res.json();
+    renderSnapshot(data);
+  } catch (err) {
+    console.error("fetchSnapshot error:", err);
+  }
+}
+
+function renderSnapshot(data) {
+  if (!data) return;
+
+  // Doctor Health
+  const docBadge = document.getElementById("dash-health-val");
+  const docSub = document.getElementById("dash-health-sub");
+  const docHealth = data.doctorHealth || { status: "PASS", errors: 0, warnings: 0, infos: 0 };
+  const docStatus = docHealth.status || "PASS";
+  if (docBadge) docBadge.innerHTML = `<span class="badge badge-${docStatus.toLowerCase()}">${docStatus}</span>`;
+  if (docSub) docSub.textContent = `${docHealth.errors || 0} err, ${docHealth.warnings || 0} warn, ${docHealth.infos || 0} info`;
+  
+  const sbDoc = document.getElementById("sb-doc-status");
+  if (sbDoc) {
+    sbDoc.textContent = docStatus;
+    sbDoc.style.color = docStatus === 'PASS' ? 'var(--color-success)' : 'var(--color-warning)';
+  }
+  const sdoc = document.getElementById("sidebar-doc-badge");
+  if (sdoc) {
+    sdoc.textContent = docStatus;
+    sdoc.className = `nav-badge badge-${docStatus.toLowerCase()}`;
+  }
+
+  // Loop Profile
+  const loopCfg = data.loopConfig || {};
+  const loopProf = loopCfg.enabled ? (loopCfg.maxExecutions === 25 ? "standard" : loopCfg.maxExecutions === 50 ? "deep" : loopCfg.permissionMode === "unrestricted" ? "unrestricted" : "until-done") : "disabled";
+  const dashLoopVal = document.getElementById("dash-loop-val");
+  if (dashLoopVal) dashLoopVal.textContent = loopProf;
+  const dashLoopSub = document.getElementById("dash-loop-sub");
+  if (dashLoopSub) dashLoopSub.textContent = loopCfg.enabled ? `${loopCfg.maxExecutions || '∞'} exec (${loopCfg.permissionMode || 'guarded'})` : "Disabled";
+  const sideLoopBadge = document.getElementById("sidebar-loop-badge");
+  if (sideLoopBadge) sideLoopBadge.textContent = loopProf;
+
+  const sbLoop = document.getElementById("sb-loop-status");
+  if (sbLoop) sbLoop.textContent = `${loopProf} (${loopCfg.maxExecutions || '∞'} exec)`;
+
+  // Active loop cards highlight
+  document.querySelectorAll(".profile-btn").forEach(el => el.classList.remove("active"));
+  const activeBtn = document.getElementById(`prof-${loopProf}-card`) || document.getElementById(`loop-btn-${loopProf}`);
+  if (activeBtn) activeBtn.classList.add("active");
+
+  // Tasks
+  const taskCounts = data.taskCounts || {};
+  const queued = taskCounts.queued || 0;
+  const running = taskCounts.running || 0;
+  const totalTasks = Object.values(taskCounts).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+  const dashTasksVal = document.getElementById("dash-tasks-val");
+  if (dashTasksVal) dashTasksVal.textContent = totalTasks;
+  const dashTasksSub = document.getElementById("dash-tasks-sub");
+  if (dashTasksSub) dashTasksSub.textContent = `${running} running, ${queued} queued`;
+
+  const sbTasks = document.getElementById("sb-tasks-status");
+  if (sbTasks) sbTasks.textContent = `${running} active, ${queued} queued`;
+
+  // Capabilities
+  const mcpList = Array.isArray(data.mcpServers) ? data.mcpServers : [];
+  const dashCapsVal = document.getElementById("dash-caps-val");
+  if (dashCapsVal) dashCapsVal.textContent = `${data.skillsCount || 0} / ${mcpList.length}`;
+  const sideCapsBadge = document.getElementById("sidebar-caps-badge");
+  if (sideCapsBadge) sideCapsBadge.textContent = data.skillsCount || 0;
+
+  // Version
+  const sbVer = document.getElementById("sb-version");
+  if (sbVer && data.version) sbVer.textContent = `v${data.version}`;
+
+  // Render recent tasks
+  renderTasksTable("dash-tasks-table", Array.isArray(data.recentTasks) ? data.recentTasks : []);
+  renderTasksTable("autonomy-tasks-tbody", Array.isArray(data.recentTasks) ? data.recentTasks : []);
+}
+
+function renderTasksTable(tbodyId, tasks) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  if (!tasks || tasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-secondary);">No tasks in queue</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.map(t => `
+    <tr>
+      <td><span class="shortcut-hint">#${t.id.slice(0, 8)}</span></td>
+      <td style="font-weight:600;">${escapeHtml(t.description || t.title || 'Task')}</td>
+      <td><span class="badge badge-${t.status.toLowerCase()}">${t.status}</span></td>
+      <td><span class="shortcut-hint">${t.priority || 'normal'}</span></td>
+      <td style="color:var(--text-dim); font-size:11px;">${t.createdAt ? t.createdAt.slice(11, 19) : '-'}</td>
+      <td>
+        <div style="display:flex; gap:6px;">
+          ${t.status === 'queued' || t.status === 'failed' ? `<button class="btn btn-sm btn-primary" onclick="taskAction('run', '${t.id}')">▶</button>` : ''}
+          ${t.status === 'running' ? `<button class="btn btn-sm btn-warning" onclick="taskAction('cancel', '${t.id}')">⏹</button>` : ''}
+          ${t.status === 'failed' || t.status === 'cancelled' ? `<button class="btn btn-sm" onclick="taskAction('retry', '${t.id}')">🔄</button>` : ''}
+          <button class="btn btn-sm btn-danger" onclick="taskAction('remove', '${t.id}')"><svg class="icon icon-sm"><use href="#icon-trash"/></svg></button>
+        </div>
+      </td>
+    </tr>
+  `).join("");
+}
+
+// SSE Real-time Logs
+function setupSSE() {
+  const es = new EventSource("/api/events/stream");
+  const pill = document.getElementById("header-sse-pill");
+  const sbConn = document.getElementById("sb-conn-text");
+
+  es.onopen = () => {
+    if (pill) { pill.className = "status-pill"; }
+    if (sbConn) sbConn.textContent = "SSE: Connected";
+  };
+
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      appendLog(data);
+    } catch (err) {}
+  };
+
+  es.onerror = () => {
+    if (pill) { pill.className = "status-pill offline"; }
+    if (sbConn) sbConn.textContent = "SSE: Reconnecting...";
+    setTimeout(setupSSE, 3000);
+  };
+}
+
+function appendLog(ev) {
+  allLogs.push(ev);
+  if (allLogs.length > 1000) allLogs.shift();
+  renderLogLine(ev);
+}
+
+function renderLogLine(ev) {
+  if (logFilter !== "ALL" && ev.Level !== logFilter) return;
+  const out = document.getElementById("console-output");
+  if (!out) return;
+
+  const row = document.createElement("div");
+  row.className = `log-line log-${ev.Level}`;
+  row.innerHTML = `
+    <span class="log-time">${ev.Timestamp ? ev.Timestamp.slice(11, 19) : ''}</span>
+    <span class="log-lvl">[${ev.Level}]</span>
+    <span class="log-src">${ev.Source || 'app'}:</span>
+    <span class="log-msg">${escapeHtml(ev.Message || '')}</span>
+  `;
+  out.appendChild(row);
+  out.scrollTop = out.scrollHeight;
+}
+
+function clearLogs() {
+  allLogs = [];
+  document.getElementById("console-output").innerHTML = "";
+  showToast("Console cleared", "info");
+}
+
+function filterLogs(lvl) {
+  logFilter = lvl;
+  const out = document.getElementById("console-output");
+  out.innerHTML = "";
+  allLogs.forEach(renderLogLine);
+}
+
+// Actions with Button Feedback States
+async function setLoopProfile(profile) {
+  try {
+    let riskAccept = false;
+    if (profile === "unrestricted") {
+      if (!confirm("Внимание: Профиль Unrestricted отключает проверки разрешений и лимиты. Вы подтверждаете действие?")) return;
+      riskAccept = true;
+    }
+    const res = await fetch("/api/loop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "enable", profile, riskAccept })
+    });
+    if (res.ok) {
+      showToast(`Loop profile set to '${profile}'`, "success");
+      fetchSnapshot();
+    } else {
+      const err = await res.json();
+      showToast(err.error || "Failed to set profile", "error");
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function disableLoop() {
+  try {
+    const res = await fetch("/api/loop", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "disable" })
+    });
+    if (res.ok) {
+      showToast("Loop disabled", "info");
+      fetchSnapshot();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function runDoctor(full = false) {
+  showToast("Running Doctor diagnostics...", "info");
+  const probe = full && document.getElementById("doc-probe-mcp") ? document.getElementById("doc-probe-mcp").checked : false;
+  const self = full && document.getElementById("doc-self-test") ? document.getElementById("doc-self-test").checked : false;
+
+  try {
+    const res = await fetch(`/api/doctor?probe_mcp=${probe}&self_test=${self}`);
+    const data = await res.json();
+    currentDoctorFindings = data.Findings || [];
+    renderDoctorFindings(currentDoctorFindings);
+    showToast(`Doctor complete: ${currentDoctorFindings.length} findings`, "success");
+    fetchSnapshot();
+  } catch (e) {
+    showToast("Doctor failed: " + e.message, "error");
+  }
+}
+
+function renderDoctorFindings(findings) {
+  const tbody = document.getElementById("doctor-findings-tbody");
+  const dashList = document.getElementById("dash-findings-list");
+  if (!findings || findings.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-secondary);">No findings (PASS)</td></tr>';
+    dashList.innerHTML = '<div style="color:var(--color-success); font-size:12px; display:flex; align-items:center; gap:6px;"><svg class="icon icon-sm"><use href="#icon-check"/></svg> Все проверки пройдены без ошибок</div>';
+    return;
+  }
+
+  tbody.innerHTML = findings.map(f => `
+    <tr>
+      <td><span class="badge badge-${f.Level.toLowerCase()}">${f.Level}</span></td>
+      <td style="font-weight:600;">${escapeHtml(f.Area)}</td>
+      <td>${escapeHtml(f.Message)}</td>
+    </tr>
+  `).join("");
+
+  dashList.innerHTML = findings.slice(0, 5).map(f => `
+    <div style="display:flex; align-items:center; gap:8px; font-size:12px;">
+      <span class="badge badge-${f.Level.toLowerCase()}">${f.Level}</span>
+      <span style="font-weight:600;">${escapeHtml(f.Area)}:</span>
+      <span style="color:var(--text-secondary);">${escapeHtml(f.Message)}</span>
+    </div>
+  `).join("");
+}
+
+function filterDoctorFindings(q) {
+  const filtered = currentDoctorFindings.filter(f =>
+    f.Area.toLowerCase().includes(q.toLowerCase()) || f.Message.toLowerCase().includes(q.toLowerCase())
+  );
+  renderDoctorFindings(filtered);
+}
+
+async function runInstall(profile) {
+  showToast(`Starting ${profile} installation...`, "info");
+  try {
+    const res = await fetch("/api/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile, prereqs: true })
+    });
+    if (res.ok) {
+      showToast(`${profile} installation successful!`, "success");
+      fetchSnapshot();
+    } else {
+      const err = await res.json();
+      showToast("Install error: " + err.error, "error");
+    }
+  } catch (e) {
+    showToast("Install failed: " + e.message, "error");
+  }
+}
+
+// Tasks Management
+function openNewTaskModal() {
+  document.getElementById("modal-task").classList.add("active");
+  document.getElementById("modal-task-desc").focus();
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove("active");
+}
+
+async function submitNewTask() {
+  const desc = document.getElementById("modal-task-desc").value.trim();
+  const priority = document.getElementById("modal-task-pri").value;
+  const kind = document.getElementById("modal-task-kind").value;
+
+  if (!desc) {
+    alert("Please enter task description");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/tasks/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: desc, priority, kind })
+    });
+    if (res.ok) {
+      closeModal("modal-task");
+      document.getElementById("modal-task-desc").value = "";
+      showToast("Task created", "success");
+      fetchSnapshot();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function taskAction(action, taskId) {
+  try {
+    const res = await fetch("/api/tasks/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, taskId })
+    });
+    if (res.ok) {
+      showToast(`Task ${action} complete`, "info");
+      fetchSnapshot();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+// Capabilities Fetching
+async function fetchCapabilities() {
+  try {
+    const [sksRes, mcpRes] = await Promise.all([
+      fetch("/api/skills"),
+      fetch("/api/mcp")
+    ]);
+    allSkills = await sksRes.json();
+    renderSkills(allSkills);
+
+    const mcpData = await mcpRes.json();
+    renderMCP(mcpData.servers || []);
+  } catch (e) {
+    console.error("fetchCapabilities error:", e);
+  }
+}
+
+function renderSkills(skills) {
+  const list = document.getElementById("skills-list");
+  document.getElementById("skills-count-sub").textContent = `${skills.length} skills installed`;
+  if (!skills || skills.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-secondary); font-size:12px;">No skills installed</div>';
+    return;
+  }
+  list.innerHTML = skills.map(s => `
+    <div style="padding:8px 12px; background:var(--surface-input); border:1px solid var(--border-default); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between;">
+      <div>
+        <div style="font-weight:600; font-size:13px;">${escapeHtml(s.Name || s.name)}</div>
+        <div style="color:var(--text-dim); font-size:11px;">${escapeHtml(s.Path || s.path || '')}</div>
+      </div>
+      <button class="btn btn-sm btn-danger" onclick="removeSkill('${s.Name || s.name}')"><svg class="icon icon-sm"><use href="#icon-trash"/></svg></button>
+    </div>
+  `).join("");
+}
+
+function filterSkills(q) {
+  const filtered = allSkills.filter(s => (s.Name || s.name).toLowerCase().includes(q.toLowerCase()));
+  renderSkills(filtered);
+}
+
+async function syncSkills(action) {
+  showToast(`Syncing skills (${action})...`, "info");
+  try {
+    const res = await fetch("/api/skills/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action })
+    });
+    if (res.ok) {
+      showToast("Skills synced", "success");
+      fetchCapabilities();
+      fetchSnapshot();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function removeSkill(name) {
+  if (!confirm(`Удалить навык '${name}'?`)) return;
+  try {
+    const res = await fetch("/api/skills/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove", name })
+    });
+    if (res.ok) {
+      showToast(`Skill '${name}' removed`, "info");
+      fetchCapabilities();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+function renderMCP(servers) {
+  const list = document.getElementById("mcp-list");
+  document.getElementById("mcp-count-sub").textContent = `${servers.length} configured`;
+  if (!servers || servers.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-secondary); font-size:12px;">No MCP servers configured</div>';
+    return;
+  }
+  list.innerHTML = servers.map(s => `
+    <div style="padding:9px 12px; background:var(--surface-input); border:1px solid var(--border-default); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="status-dot" style="width:6px; height:6px;"></span>
+        <span style="font-weight:700; font-size:13px;">${escapeHtml(s)}</span>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button class="btn btn-sm" onclick="probeSingleMCP('${s}')">Probe</button>
+        <button class="btn btn-sm btn-danger" onclick="removeMCP('${s}')"><svg class="icon icon-sm"><use href="#icon-trash"/></svg></button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function addMCP() {
+  const name = document.getElementById("mcp-add-select").value;
+  try {
+    const res = await fetch("/api/mcp/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add", name })
+    });
+    if (res.ok) {
+      showToast(`MCP server '${name}' added`, "success");
+      fetchCapabilities();
+      fetchSnapshot();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function removeMCP(name) {
+  if (!confirm(`Удалить MCP сервер '${name}'?`)) return;
+  try {
+    const res = await fetch("/api/mcp/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove", name })
+    });
+    if (res.ok) {
+      showToast(`MCP server '${name}' removed`, "info");
+      fetchCapabilities();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function probeSingleMCP(name) {
+  showToast(`Probing MCP '${name}'...`, "info");
+  try {
+    const res = await fetch(`/api/mcp/probe?server=${name}`);
+    const data = await res.json();
+    alert("MCP Probe Result:\n" + JSON.stringify(data, null, 2));
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function probeMCPServers() {
+  showToast("Probing all MCP servers...", "info");
+  try {
+    const res = await fetch("/api/mcp/probe");
+    const data = await res.json();
+    alert("Live Probe Results:\n" + JSON.stringify(data, null, 2));
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+// Governance
+async function fetchGovernance() {
+  try {
+    const bRes = await fetch("/api/backups");
+    const backups = await bRes.json();
+    renderBackups(backups || []);
+  } catch (e) {}
+}
+
+function renderBackups(backups) {
+  const list = document.getElementById("backups-list");
+  if (!backups || backups.length === 0) {
+    list.innerHTML = '<div style="color:var(--text-secondary); font-size:12px;">No snapshots yet</div>';
+    return;
+  }
+  list.innerHTML = backups.map(b => `
+    <div style="padding:8px 12px; background:var(--surface-input); border:1px solid var(--border-default); border-radius:var(--radius-sm); display:flex; align-items:center; justify-content:space-between;">
+      <span style="font-family:var(--font-mono); font-size:12px;">${escapeHtml(b)}</span>
+      <button class="btn btn-sm" onclick="showToast('Snapshot is ready', 'info')">Inspect</button>
+    </div>
+  `).join("");
+}
+
+async function createBackupSnapshot() {
+  showToast("Creating backup snapshot...", "info");
+  try {
+    const res = await fetch("/api/backups", { method: "POST" });
+    if (res.ok) {
+      showToast("Backup snapshot created", "success");
+      fetchGovernance();
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+async function runSecurityAudit() {
+  showToast("Running security scan...", "info");
+  try {
+    const res = await fetch("/api/security");
+    const data = await res.json();
+    const box = document.getElementById("security-report-box");
+    box.innerHTML = `
+      <div style="padding:10px; background:var(--color-success-subtle); border:1px solid var(--color-success-border); border-radius:var(--radius-sm);">
+        <strong>Score:</strong> ${data.Score || '100%'} | <strong>Issues:</strong> ${data.Issues ? data.Issues.length : 0}
+      </div>
+      <pre style="font-family:var(--font-mono); font-size:11px; max-height:200px; overflow-y:auto; padding:8px; background:rgba(0,0,0,0.3);">${JSON.stringify(data, null, 2)}</pre>
+    `;
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
+
+// Command Palette
+const paletteCommands = [
+  { id: "tab-dash", title: "Обзор (Dashboard)", action: () => showTab('dashboard') },
+  { id: "tab-doc", title: "Setup & Doctor", action: () => showTab('doctor') },
+  { id: "tab-caps", title: "Возможности & MCP", action: () => showTab('capabilities') },
+  { id: "tab-auto", title: "Автономия & Loop", action: () => showTab('autonomy') },
+  { id: "tab-gov", title: "Безопасность & Governance", action: () => showTab('governance') },
+  { id: "tab-con", title: "Живая Консоль", action: () => showTab('console') },
+  { id: "tab-set", title: "Настройки & UI", action: () => showTab('settings') },
+  { id: "act-doc", title: "Запустить Doctor", action: () => runDoctor(true) },
+  { id: "act-task", title: "Создать задачу", action: () => openNewTaskModal() },
+  { id: "act-sync", title: "Синхронизировать скиллы", action: () => syncSkills('sync-recommended') },
+  { id: "act-probe", title: "Probe MCP", action: () => probeMCPServers() },
+  { id: "act-bkp", title: "Создать резервную копию", action: () => createBackupSnapshot() }
+];
+
+function togglePalette() {
+  const p = document.getElementById("palette-backdrop");
+  p.classList.toggle("active");
+  if (p.classList.contains("active")) {
+    document.getElementById("palette-input").value = "";
+    filterPalette("");
+    document.getElementById("palette-input").focus();
+  }
+}
+
+function filterPalette(q) {
+  const list = document.getElementById("palette-items");
+  const filtered = paletteCommands.filter(c => c.title.toLowerCase().includes(q.toLowerCase()));
+  list.innerHTML = filtered.map((c, i) => `
+    <div class="palette-item ${i===0?'active':''}" onclick="runPaletteCmd('${c.id}')">
+      <span>${escapeHtml(c.title)}</span>
+      <span class="shortcut-hint">↵</span>
+    </div>
+  `).join("");
+}
+
+function runPaletteCmd(id) {
+  const cmd = paletteCommands.find(c => c.id === id);
+  if (cmd) {
+    togglePalette();
+    cmd.action();
+  }
+}
+
+// Hotkeys
+function setupHotkeys() {
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      togglePalette();
+    }
+    if (e.key === "Escape") {
+      document.querySelectorAll(".modal-backdrop, .palette-backdrop").forEach(el => el.classList.remove("active"));
+    }
+    if (!["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)) {
+      if (e.key === "1") showTab("dashboard");
+      if (e.key === "2") showTab("doctor");
+      if (e.key === "3") showTab("capabilities");
+      if (e.key === "4") showTab("autonomy");
+      if (e.key === "5") showTab("governance");
+      if (e.key === "6") showTab("console");
+      if (e.key === "7") showTab("settings");
+    }
+  });
+}
+
+function setRefreshInterval(ms) {
+  if (refreshTimer) clearInterval(refreshTimer);
+  const val = parseInt(ms, 10);
+  if (val > 0) {
+    refreshTimer = setInterval(fetchSnapshot, val);
+  }
+}
+
+function triggerAction(act, btn) {
+  if (btn) {
+    btn.classList.add("is-loading");
+    setTimeout(() => {
+      btn.classList.remove("is-loading");
+      btn.classList.add("is-success");
+      setTimeout(() => btn.classList.remove("is-success"), 1200);
+    }, 600);
+  }
+  if (act === "doctor") runDoctor(true);
+  if (act === "sync_rec") syncSkills("sync-recommended");
+}
+
+function showToast(msg, type = "info") {
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.innerHTML = `
+    <svg class="icon"><use href="#icon-${type === 'success' ? 'check' : type === 'error' || type === 'warning' ? 'alert' : 'info'}"/></svg>
+    <span>${escapeHtml(msg)}</span>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(40px)";
+    setTimeout(() => toast.remove(), 250);
+  }, 3500);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

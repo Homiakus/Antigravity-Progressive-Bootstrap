@@ -51,3 +51,6 @@ logs/
 tmp/
 .tmp/
 scratch/
+.playwright-mcp/
+*.old
+agctl_*.png

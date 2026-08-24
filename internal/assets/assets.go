@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -13,25 +14,18 @@ import (
 var data embed.FS
 
 func SkillNames() []string {
-	return []string{
-		"agctl",
-		"agctl-doctor",
-		"agctldoctor",
-		"agctl-run",
-		"agctlrun",
-		"agctl-replan",
-		"agctlreplan",
-		"agctl-dashboard",
-		"agctldashboard",
-		"agctl-loop",
-		"agctlloop",
-		"agctl-tasks",
-		"agctltasks",
-		"adaptive-tool-router",
-		"autonomous-engineering",
-		"autonomous-completion-loop",
-		"editorial-quality-director",
+	entries, err := data.ReadDir("data/skills")
+	if err != nil {
+		return nil
 	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func InstallSkill(name, dstRoot string) error {

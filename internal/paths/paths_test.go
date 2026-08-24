@@ -60,3 +60,42 @@ func TestEnsureCreatesHarnessDirectoriesButNotDatabaseFile(t *testing.T) {
 		t.Fatalf("Ensure must not create DB file; stat err=%v", err)
 	}
 }
+
+func TestDetectPlatformsWithEnvOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AGCTL_PLATFORM", "cursor")
+
+	p, err := Detect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ActivePlatform != PlatformCursor {
+		t.Fatalf("ActivePlatform = %q, want %q", p.ActivePlatform, PlatformCursor)
+	}
+
+	infos := p.GetPlatformInfos()
+	if len(infos) == 0 {
+		t.Fatal("Platform infos must not be empty")
+	}
+
+	foundActive := false
+	for _, info := range infos {
+		if info.Platform == PlatformCursor && info.Active {
+			foundActive = true
+		}
+	}
+	if !foundActive {
+		t.Fatalf("Expected Cursor to be active in PlatformInfos")
+	}
+}
+
+func TestWorkspaceRuleFilesDiscovery(t *testing.T) {
+	ws := t.TempDir()
+	ruleFiles := WorkspaceRuleFiles(ws)
+	if len(ruleFiles) < 4 {
+		t.Fatalf("Expected at least 4 rule files, got %d", len(ruleFiles))
+	}
+}
+

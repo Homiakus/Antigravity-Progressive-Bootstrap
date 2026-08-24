@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/homiakus/agctl/internal/agents"
 	"github.com/homiakus/agctl/internal/backup"
+	"github.com/homiakus/agctl/internal/capability"
 	"github.com/homiakus/agctl/internal/doctor"
 	"github.com/homiakus/agctl/internal/hooks"
 	"github.com/homiakus/agctl/internal/installer"
@@ -18,12 +20,51 @@ import (
 	"github.com/homiakus/agctl/internal/mcpprobe"
 	"github.com/homiakus/agctl/internal/paths"
 	"github.com/homiakus/agctl/internal/permissions"
+	"github.com/homiakus/agctl/internal/project"
+	"github.com/homiakus/agctl/internal/replan"
+	"github.com/homiakus/agctl/internal/risk"
 	"github.com/homiakus/agctl/internal/router"
 	"github.com/homiakus/agctl/internal/skills"
-	"github.com/homiakus/agctl/internal/tui"
+	"github.com/homiakus/agctl/internal/tasks"
+	"github.com/homiakus/agctl/internal/web"
 )
 
 const Version = "3.2.1"
+
+func autoBootstrap(p paths.Paths, workspace string) {
+	// 1. Ensure latest self binary is installed to user bin for background hooks and agent processes
+	bin, err := installer.InstallSelf(p)
+	if err == nil {
+		_ = hooks.Install(p, bin)
+		_ = installer.TouchManifest(p, Version)
+	}
+
+	// 2. Ensure global adaptive control-plane rule exists in rules directory and GEMINI.md
+	_ = installer.InstallGlobalRule(p, router.ModeBalanced)
+
+	// 3. Ensure risk policy, task config, and replan supervisor configs exist
+	_ = risk.EnsurePolicy(p)
+	if _, err := os.Stat(p.TaskConfig); os.IsNotExist(err) {
+		_ = tasks.SaveConfig(p, tasks.DefaultConfig())
+	}
+	if _, err := os.Stat(p.ReplanConfig); os.IsNotExist(err) {
+		_ = replan.SaveConfig(p, replan.DefaultConfig())
+	}
+
+	// 4. Ensure embedded core skills and agent profiles are installed
+	_ = skills.InstallEmbedded(p)
+	_ = agents.InstallEmbedded(p, "")
+
+	// 5. If current directory is a workspace, ensure capabilities and project registration
+	var workspaces []string
+	if workspace != "" {
+		workspaces = []string{workspace}
+		if d, err := project.Detect(workspace); err == nil && len(d.Profiles) > 0 {
+			_ = agents.InstallEmbedded(p, workspace)
+		}
+	}
+	_, _ = capability.Build(p, workspaces)
+}
 
 func main() {
 	p, err := paths.Detect()
@@ -36,7 +77,9 @@ func main() {
 
 	args := os.Args[1:]
 	if len(args) == 0 {
-		if err := tui.Run(p); err != nil {
+		ws, _ := os.Getwd()
+		autoBootstrap(p, ws)
+		if err := web.Serve(p, ws, "127.0.0.1:8787", true, false); err != nil {
 			fatal(err)
 		}
 		return
@@ -108,8 +151,10 @@ func main() {
 		must(runReplan(p, args[1:]))
 	case "security":
 		must(runSecurity(p, args[1:]))
-	case "dashboard":
+	case "web", "dashboard", "ui":
 		must(runDashboard(p, args[1:]))
+	case "platforms":
+		must(runPlatforms(p, args[1:]))
 	case "paths":
 		printPaths(p)
 	case "help", "--help", "-h":
@@ -527,6 +572,36 @@ func runMigrate(p paths.Paths, args []string) error {
 	return err
 }
 
+func runPlatforms(p paths.Paths, args []string) error {
+	fs := flag.NewFlagSet("platforms", flag.ContinueOnError)
+	jsonOutput := fs.Bool("json", false, "output JSON format")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	infos := p.GetPlatformInfos()
+	if *jsonOutput {
+		printJSON(map[string]any{
+			"activePlatform": p.ActivePlatform,
+			"detected":       p.DetectedPlatforms,
+			"platforms":      infos,
+		})
+		return nil
+	}
+	fmt.Printf("Active Platform: %s\n\nSupported and Detected Platforms:\n", strings.ToUpper(string(p.ActivePlatform)))
+	for _, info := range infos {
+		status := "[ ]"
+		if info.Active {
+			status = "[*] ACTIVE"
+		} else if _, err := os.Stat(info.ConfigDir); err == nil {
+			status = "[+] INSTALLED"
+		}
+		fmt.Printf("%-14s %-28s %s\n", status, info.Label, info.Description)
+		fmt.Printf("               Config: %s\n", info.ConfigDir)
+		fmt.Printf("               Rule:   %s\n\n", info.RulePath)
+	}
+	return nil
+}
+
 func printPaths(p paths.Paths) { printJSON(p) }
 func printJSON(v any)          { b, _ := json.MarshalIndent(v, "", "  "); fmt.Println(string(b)) }
 func hasArg(args []string, want string) bool {
@@ -545,10 +620,11 @@ func must(err error) {
 func fatal(err error) { fmt.Fprintln(os.Stderr, "ERROR:", err); os.Exit(1) }
 
 func usage() {
-	fmt.Printf(`agctl %s — Antigravity Control Plane
+	fmt.Printf(`agctl %s — Universal Antigravity & Multi-Platform Web Control Plane
 
 Interactive:
-  agctl
+  agctl                                         # Launches Web Control Plane in default browser
+  agctl web [--listen 127.0.0.1:8787] [--no-browser]
 
 Install:
   agctl install recommended [--prereqs]
@@ -557,6 +633,7 @@ Install:
 
 Core:
   agctl doctor [--workspace PATH] [--self-test] [--probe-mcp]
+  agctl platforms [--json]
   agctl skills list|install embedded|sync-pack ID|sync-recommended|remove NAME
   agctl mcp list|add|remove|doctor|probe [--workspace PATH]
   agctl router status|enable MODE|disable|inventory

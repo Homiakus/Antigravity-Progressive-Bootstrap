@@ -122,24 +122,46 @@ Capability routing and autonomous execution do not override explicit user constr
 }
 
 func InstallGlobalRule(p paths.Paths, mode string) error {
-	old := ""
-	if b, err := os.ReadFile(p.GlobalRule); err == nil {
-		old = string(b)
-	}
 	block := GlobalRule(mode)
-	start := strings.Index(old, ruleBegin)
-	end := strings.Index(old, ruleEnd)
-	var next string
-	if start >= 0 && end >= start {
-		end += len(ruleEnd)
-		next = old[:start] + block + old[end:]
-	} else if strings.TrimSpace(old) == "" {
-		next = block
-	} else {
-		next = strings.TrimRight(old, "\r\n") + "\n\n" + block
+	targets := []string{p.GlobalRule}
+
+	// Also sync to other platform global rule files if they exist
+	for _, extra := range []string{
+		filepath.Join(p.Home, "AGENTS.md"),
+		filepath.Join(p.Home, "CLAUDE.md"),
+		filepath.Join(p.Home, ".cursorrules"),
+		filepath.Join(p.GeminiRoot, "GEMINI.md"),
+	} {
+		if extra != p.GlobalRule {
+			if _, err := os.Stat(extra); err == nil {
+				targets = append(targets, extra)
+			}
+		}
 	}
-	return jsonx.WriteTextAtomic(p.GlobalRule, next, p.BackupsRoot)
+
+	for _, target := range targets {
+		old := ""
+		if b, err := os.ReadFile(target); err == nil {
+			old = string(b)
+		}
+		start := strings.Index(old, ruleBegin)
+		end := strings.Index(old, ruleEnd)
+		var next string
+		if start >= 0 && end >= start {
+			end += len(ruleEnd)
+			next = old[:start] + block + old[end:]
+		} else if strings.TrimSpace(old) == "" {
+			next = block
+		} else {
+			next = strings.TrimRight(old, "\r\n") + "\n\n" + block
+		}
+		if err := jsonx.WriteTextAtomic(target, next, p.BackupsRoot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
 
 type Prerequisite struct {
 	ID      string

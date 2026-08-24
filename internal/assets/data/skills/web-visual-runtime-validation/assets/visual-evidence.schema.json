@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VisualEvidencePacket",
+  "type": "object",
+  "required": [
+    "state",
+    "runtime",
+    "layoutFindings",
+    "visualDiff",
+    "vlm",
+    "artifacts"
+  ],
+  "properties": {
+    "state": {
+      "type": "object",
+      "required": [
+        "route",
+        "viewport",
+        "scenario"
+      ],
+      "properties": {
+        "route": {
+          "type": "string"
+        },
+        "scenario": {
+          "type": "string"
+        },
+        "viewport": {
+          "type": "object",
+          "required": [
+            "width",
+            "height"
+          ],
+          "properties": {
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            }
+          }
+        },
+        "theme": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "buildHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "runtime": {
+      "type": "object"
+    },
+    "layoutFindings": {
+      "type": "array"
+    },
+    "aria": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "visualDiff": {
+      "type": "object"
+    },
+    "vlm": {
+      "type": "object"
+    },
+    "artifacts": {
+      "type": "object"
+    }
+  }
+}
