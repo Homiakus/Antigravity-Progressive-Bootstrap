@@ -52,6 +52,9 @@ type TelegramStore interface {
 	ReserveTelegramCallback(context.Context, string, int64, int64, time.Time) (bool, error)
 	UpsertTelegramBinding(context.Context, model.TelegramBinding) error
 	GetTelegramBindingByTopic(context.Context, int64, int64) (model.TelegramBinding, error)
+	GetTelegramBindingBySession(context.Context, model.RemoteSessionID) (model.TelegramBinding, error)
+	GetTelegramMirrorState(context.Context, model.RemoteSessionID) (model.TelegramMirrorState, error)
+	UpsertTelegramMirrorState(context.Context, model.TelegramMirrorState) error
 }
 
 type RemoteCommandStore interface {
@@ -63,7 +66,11 @@ type RemoteCommandStore interface {
 
 type RemoteEventStore interface {
 	AppendRemoteEvent(context.Context, model.RemoteEvent) (model.RemoteEvent, bool, error)
+	AppendRemoteEventWithOutbox(context.Context, model.RemoteEvent, string, []byte) (model.RemoteEvent, bool, error)
 	ListRemoteEventsAfter(context.Context, model.RemoteSessionID, uint64, int) ([]model.RemoteEvent, error)
+	ListRemoteOutbox(context.Context, string, time.Time, int) ([]model.RemoteOutboxItem, error)
+	MarkRemoteOutboxDelivered(context.Context, int64, time.Time) error
+	ScheduleRemoteOutboxRetry(context.Context, int64, time.Time) error
 }
 
 type Store interface {
