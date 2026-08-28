@@ -44,12 +44,12 @@ var requiredCompletionEvidence = []string{
 // CompletionEvidence is a validated, digest-bound view of the engineering
 // evidence supplied to the autonomous completion gate.
 type CompletionEvidence struct {
-	Managed     bool
-	PlanPath    string
-	PlanDigest  string
-	TaskID      string
-	FindingIDs  []string
-	Categories  map[string][]string
+	Managed      bool
+	PlanPath     string
+	PlanDigest   string
+	TaskID       string
+	FindingIDs   []string
+	Categories   map[string][]string
 	Verification []string
 }
 
@@ -157,9 +157,6 @@ func ValidateCompletion(start string, verification []string) (CompletionEvidence
 	findingValues := result.Categories["findings"]
 	for _, value := range findingValues {
 		for _, token := range splitIDs(value) {
-			if strings.EqualFold(token, "none") {
-				continue
-			}
 			if !findingIDRE.MatchString(token) {
 				return result, fmt.Errorf("invalid finding id %q", token)
 			}
@@ -224,7 +221,12 @@ func parsePlanIDs(plan string) (map[string]string, map[string]struct{}) {
 }
 
 func splitIDs(value string) []string {
-	value = strings.NewReplacer(",", " ", ";", " ", "|", " ").Replace(value)
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "none:") || strings.HasPrefix(lower, "none -") {
+		return nil
+	}
+	value = strings.NewReplacer(",", " ", ";", " ", "|", " ").Replace(trimmed)
 	return strings.Fields(value)
 }
 
