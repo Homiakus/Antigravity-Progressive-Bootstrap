@@ -23,9 +23,9 @@ Provider-control-plane foundation completed/verified through T-007:
 - T-003 SQLite v14 provider-observation schema: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 durable provider observation Store/SQLite implementation: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 - T-006 Antigravity observation adapter: `a46eb75f947f97f62a06129e3469fe18466d6843`.
-- T-007 Codex App Server observation adapter: fully verified on validation head `5b9b8852333620be0857d885bf1db5d8203f6f43`; atomic publication is the current iteration's final action.
+- T-007 Codex App Server observation adapter: `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 
-Next highest-leverage work after publication: T-009 provider-neutral capacity normalization/effective headroom, then T-005 SQLite v15 assignment/reservation/usage/circuit persistence. Both are now unblocked.
+Next highest-leverage work: T-009 provider-neutral capacity normalization/effective headroom, then T-005 SQLite v15 assignment/reservation/usage/circuit persistence. Both are unblocked.
 
 ## 3. Architecture Map
 
@@ -78,15 +78,11 @@ Harness CI enforces module tidiness, bridge syntax/contracts, `go test ./...`, `
 
 Persistence is SQLite schema v14. Migrations 1..13 are immutable checksummed releases; v14 is append-only provider observation schema.
 
-T-007 verification on `5b9b8852333620be0857d885bf1db5d8203f6f43`:
+T-007 verification:
 
-- module graph tidy: PASS;
-- bridge syntax/contracts: PASS;
-- unit/integration: PASS;
-- race detector: PASS;
-- vet: PASS;
-- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
-- Windows tests: PASS.
+- implementation head `5b9b8852333620be0857d885bf1db5d8203f6f43`: full Linux/Windows Harness CI PASS;
+- reconciled head `ccd674547088215ba0deb1c34065f515645a4504`: full Linux/Windows Harness CI PASS;
+- published atomic tree: `cefead407f3ad4a11ac46379f2f9b72a9129d353`, fast-forward to `main`, no force.
 
 ## 5. System Invariants
 
@@ -237,7 +233,6 @@ T014..T023 -> T024 rollout -> T025 legacy deletion -> T026 final re-audit
 - **F Proof/operations:** T-020..T-026.
 
 ## 11. Atomic Tasks
-
 ### T-001 — Add provider-domain primitives
 **Status:** DONE. **Priority:** P0. Commit `bf060a70833504fc5dc979181d59453276a56e0c`.
 
@@ -261,7 +256,7 @@ Official status-line/headless normalization, bounded/tolerant parsing, native qu
 Verification: full Linux/Windows Harness CI PASS. Commit `a46eb75f947f97f62a06129e3469fe18466d6843`.
 
 ### T-007 — Implement Codex App Server observation adapter
-**Status:** DONE / VERIFIED, publication pending. **Priority:** P0. **Leverage:** HIGH.  
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
 Files: `internal/harness/provider/codex/{adapter.go,adapter_test.go,reconnect_test.go}`.  
 Rate limits: stateful thread-safe baseline from `account/rateLimits/read`; sparse merge for `account/rateLimits/updated`; stale updates rejected; reconnect baseline atomically replaces rolling state; multi-limit/native IDs and primary/secondary windows preserved; `usedPercent` maps only to FRACTION; reset Unix timestamps preserved; account health becomes EXHAUSTED only when every observed bucket proves exhaustion, otherwise UNKNOWN.  
 Models: complete paginated `model/list` cycle required before atomic catalog replacement; dynamic model IDs/display names/hidden state/input modalities/personality/multi-agent capability normalized; incomplete, duplicate, stale or RPC-error cycles fail closed without erasing the previous catalog. Current v2 `Model` contract does not expose context-window size, so `ProviderModelDescriptor.ContextLimit` remains unknown rather than inferred.  
@@ -269,7 +264,9 @@ Sessions/context: App Server thread/token usage is parsed as separate `ThreadUsa
 Protocol/security: direct bodies and JSON-RPC envelopes accepted; JSON-RPC errors fail closed; unknown fields tolerated; known numeric/identity bounds validated; payload size capped at 1 MiB; no auth/error payload is copied into provider state.  
 Concurrency: adapter state guarded by RWMutex; concurrent sparse updates and coherent reads covered under race detector.  
 Tests: multi/single bucket normalization, sparse null preservation, ambiguous/no-baseline/stale deltas, explicit exhaustion, numeric/identity bounds, complete/incomplete/duplicate/stale model pagination, no session/model guessing, token usage parsing, oversized payloads, concurrent updates/reads, reconnect baseline replacement and RPC errors.  
-Verification: full Linux/Windows Harness CI PASS on `5b9b8852333620be0857d885bf1db5d8203f6f43`. Dependencies: T-002,T-004.
+Verification: full Linux/Windows Harness CI PASS on implementation and reconciled validation heads.  
+Commit: `cefead407f3ad4a11ac46379f2f9b72a9129d353`.  
+Push: `main`, fast-forward, no force. Dependencies: T-002,T-004.
 
 ### T-008 — Build session/context broker
 **Status:** READY. **Priority:** P1.  
@@ -395,7 +392,7 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - T-003 DONE — `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 DONE — `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 - T-006 DONE — `a46eb75f947f97f62a06129e3469fe18466d6843`.
-- T-007 DONE/VERIFIED — validation head `5b9b8852333620be0857d885bf1db5d8203f6f43`; publication commit recorded after fast-forward.
+- T-007 DONE — `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 
 ## 20. Iteration Log
 
@@ -419,10 +416,11 @@ Antigravity bounded/tolerant observation adapter, coherent snapshot source, priv
 **Unexpected finding:** F-018 — current Codex thread/context telemetry has no authoritative selected-model ID, so generic session reuse must fail closed.  
 **Changes:** thread-safe Codex adapter; baseline + sparse rate-limit merge; reconnect replacement; native multi-limit windows; conservative exhaustion classification; complete model catalog replacement; separate thread token/context observation; bounded JSON-RPC parsing.  
 **Tests:** multi/single rate-limit buckets, sparse-null preservation, ambiguity/no-baseline/stale deltas, reconnect, RPC errors, exhaustion, bounds, complete/incomplete/duplicate/stale model pages, no model/session guessing, token usage, oversized payloads, concurrent updates/reads.  
-**Verification:** full Linux/Windows Harness CI PASS on `5b9b8852333620be0857d885bf1db5d8203f6f43`.  
+**Verification:** full Linux/Windows Harness CI PASS on implementation head `5b9b8852333620be0857d885bf1db5d8203f6f43` and reconciled head `ccd674547088215ba0deb1c34065f515645a4504`.  
 **Plan changes:** I-018/I-019; F-017/F-019 resolved; F-018 boundary decision; T-007 DONE; T-008/T-009 READY.  
-**Commit/Push:** atomic fast-forward publication is current final action; no force.  
-**Result:** PASS pending publication checkpoint.
+**Commit:** `cefead407f3ad4a11ac46379f2f9b72a9129d353`.  
+**Push:** `main`, fast-forward, no force.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
