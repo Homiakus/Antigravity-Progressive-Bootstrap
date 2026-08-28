@@ -1,0 +1,11 @@
+{
+  "name": "agctl-antigravity-bridge",
+  "displayName": "agctl Antigravity Bridge",
+  "description": "Loopback-only control bridge between agctl and Antigravity IDE.",
+  "version": "0.1.0",
+  "publisher": "homiakus",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./src/extension.js"
+}

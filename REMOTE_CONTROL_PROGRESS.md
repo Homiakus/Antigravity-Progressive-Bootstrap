@@ -9,13 +9,15 @@
 - [x] R1 — типизированная remote domain model, ID kinds, state enums и validation contracts.
 - [x] R2 — migration v11 с durable remote-control schema в существующем Harness `state.db`.
 - [x] R2 — repository store contract и SQLite implementation.
-- [x] R3 — repository registry с canonical path, Git metadata, allowlisted roots и idempotent registration.
-- [x] R3 — CLI surface: `agctl remote status`, `remote repo add|list|enable|disable`.
-- [x] R4 — фактический Cockpit `working_dir` gap локализован до Tauri boundary/start path; reproducible patch contract зафиксирован.
-- [ ] R4 — patch применён в writable Cockpit fork/upstream (текущее подключение `jlcodes99/cockpit-tools` имеет `push:false`).
-- [ ] R5 — `cockpit-control` binary реализован в writable Cockpit fork; protocol v1 зафиксирован в этом repo.
+- [x] R3 — repository registry + CLI `agctl remote status`, `remote repo add|list|enable|disable`.
+- [x] R4 — фактический Cockpit `working_dir` gap локализован; reproducible patch contract зафиксирован.
+- [ ] R4 — patch применён в writable Cockpit fork/upstream (`jlcodes99/cockpit-tools` доступен `push:false`).
+- [ ] R5 — `cockpit-control` binary реализован в writable Cockpit fork; protocol v1 зафиксирован.
 - [x] R6 — Go `cockpit.Client` + strict CLI protocol adapter + secret-field fail-closed tests.
-- [ ] R7+ — Antigravity Bridge/session/Telegram layers.
+- [x] R7 — собственный loopback-only Antigravity Bridge scaffold с command-fallback conversation control и registration metadata.
+- [x] R8 — Go Bridge HTTP client с loopback enforcement, bearer auth, protocol negotiation и strict decoding.
+- [ ] R7/R8 — runtime capability verification на реальной Antigravity IDE и packaging/install VSIX.
+- [ ] R9+ — single-instance RemoteSession/session reconciliation/Telegram.
 
 ## Architectural decisions already enforced
 
@@ -27,9 +29,10 @@
 6. Активная Telegram topic binding уникальна по `(chat_id, thread_id)`.
 7. Репозиторий регистрируется только через canonical Git root; удалённые transports обязаны работать только с зарегистрированными repo IDs.
 8. Внутренние Antigravity capability не считаются доступными без negotiation/runtime verification.
-9. Remote CLI использует тот же Harness `state.db` и отдельную domain-store абстракцию поверх него.
-10. `agctl` не читает/пишет Cockpit internal state: интеграция только через versioned `cockpit-control` contract.
+9. `agctl` не читает/пишет Cockpit internal state: интеграция только через versioned `cockpit-control` contract.
+10. Antigravity Bridge слушает только loopback; Go client также fail-closed отклоняет non-loopback URL.
+11. Command-fallback dispatch сериализует `focus → send`, поэтому параллельные Telegram/remote sends не могут перескочить между conversations внутри одного Bridge.
 
 ## Next critical path
 
-`Writable Cockpit fork для R4/R5 || параллельно R7 Bridge → R8 Bridge client → R9 single-instance RemoteSession`.
+`R9 single-instance RemoteSession → R10 reconciler → R11 multi-conversation → R12 multi-instance`, параллельно требуется writable Cockpit fork для физического R4/R5 и runtime Antigravity verification для расширения capabilities.
