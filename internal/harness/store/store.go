@@ -83,7 +83,6 @@ type Reader interface {
 	ListProviderAssignmentsByAttempt(context.Context, harnessmodel.AttemptID) ([]harnessmodel.ProviderAssignment, error)
 	GetProviderReservation(context.Context, harnessmodel.ProviderReservationID) (harnessmodel.ProviderReservation, error)
 	ListProviderReservationsByAssignment(context.Context, harnessmodel.ProviderAssignmentID) ([]harnessmodel.ProviderReservation, error)
-	ListProviderReservationsByAssignment(context.Context, harnessmodel.ProviderAssignmentID) ([]harnessmodel.ProviderReservation, error)
 	ListActiveProviderReservations(context.Context, harnessmodel.ProviderAccountID, time.Time, int) ([]harnessmodel.ProviderReservation, error)
 	ListAllActiveProviderReservations(context.Context, harnessmodel.ProviderAccountID, time.Time) ([]harnessmodel.ProviderReservation, error)
 	ListDueProviderReservationExpirations(context.Context, time.Time, int) ([]harnessmodel.ProviderReservation, error)
