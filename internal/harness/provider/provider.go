@@ -20,7 +20,7 @@ type Observation struct {
 // upstream APIs are inherently independent; ingestion should prefer it when
 // available.
 type SnapshotSource interface {
-	Snapshot(context.Context) (Observation, error)
+	Observe(context.Context) (Observation, error)
 }
 
 // CapacitySource exposes the latest observable external capacity for one
