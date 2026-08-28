@@ -32,16 +32,24 @@ func (t *transaction) UpsertProviderAccount(ctx context.Context, account harness
 		return err
 	}
 
-	_, err = t.tx.ExecContext(ctx, `
+	res, err := t.tx.ExecContext(ctx, `
 INSERT INTO provider_accounts(id, provider, name, state, created_at, updated_at)
 VALUES(?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
     name=excluded.name,
     state=excluded.state,
-    updated_at=excluded.updated_at`,
+    updated_at=excluded.updated_at
+WHERE provider_accounts.provider=excluded.provider
+  AND excluded.updated_at >= provider_accounts.updated_at`,
 		string(account.ID), string(account.Provider), account.Name, string(account.State), formatTime(account.CreatedAt), formatTime(account.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("upsert provider account %s: %w", account.ID, err)
+	}
+	if err := requireOneAffected(res); err != nil {
+		if errors.Is(err, harnessstore.ErrNotFound) {
+			return fmt.Errorf("provider account %s observation is stale: %w", account.ID, harnessstore.ErrConflict)
+		}
+		return err
 	}
 	return nil
 }
@@ -120,7 +128,7 @@ func (t *transaction) UpsertProviderModel(ctx context.Context, model harnessmode
 	if model.Enabled {
 		enabled = 1
 	}
-	_, err = t.tx.ExecContext(ctx, `
+	res, err := t.tx.ExecContext(ctx, `
 INSERT INTO provider_models(account_id, model_id, display_name, capabilities_json, context_limit, enabled, observed_at)
 VALUES(?,?,?,?,?,?,?)
 ON CONFLICT(account_id, model_id) DO UPDATE SET
@@ -128,10 +136,17 @@ ON CONFLICT(account_id, model_id) DO UPDATE SET
     capabilities_json=excluded.capabilities_json,
     context_limit=excluded.context_limit,
     enabled=excluded.enabled,
-    observed_at=excluded.observed_at`,
+    observed_at=excluded.observed_at
+WHERE excluded.observed_at >= provider_models.observed_at`,
 		string(model.AccountID), string(model.ID), model.DisplayName, caps, model.ContextLimit, enabled, formatTime(observedAt))
 	if err != nil {
 		return fmt.Errorf("upsert provider model %s/%s: %w", model.AccountID, model.ID, err)
+	}
+	if err := requireOneAffected(res); err != nil {
+		if errors.Is(err, harnessstore.ErrNotFound) {
+			return fmt.Errorf("provider model %s/%s observation is stale: %w", model.AccountID, model.ID, harnessstore.ErrConflict)
+		}
+		return err
 	}
 	return nil
 }
@@ -293,24 +308,31 @@ func (t *transaction) UpsertProviderSession(ctx context.Context, session harness
 	if account.Provider != session.Provider {
 		return fmt.Errorf("provider session %s provider mismatch: account=%s session=%s", session.ID, account.Provider, session.Provider)
 	}
-	_, err = t.tx.ExecContext(ctx, `
+	res, err := t.tx.ExecContext(ctx, `
 INSERT INTO provider_sessions(
     id, account_id, model_id, state, context_used, context_limit,
     last_used_at, workspace_fingerprint, observed_at
 ) VALUES(?,?,?,?,?,?,?,?,?)
 ON CONFLICT(id) DO UPDATE SET
-    account_id=excluded.account_id,
     model_id=excluded.model_id,
     state=excluded.state,
     context_used=excluded.context_used,
     context_limit=excluded.context_limit,
     last_used_at=excluded.last_used_at,
     workspace_fingerprint=excluded.workspace_fingerprint,
-    observed_at=excluded.observed_at`,
+    observed_at=excluded.observed_at
+WHERE provider_sessions.account_id=excluded.account_id
+  AND excluded.observed_at >= provider_sessions.observed_at`,
 		string(session.ID), string(session.AccountID), string(session.ModelID), string(session.State), session.ContextUsed, session.ContextLimit,
 		formatTime(session.LastUsedAt), session.WorkspaceFingerprint, formatTime(observedAt))
 	if err != nil {
 		return fmt.Errorf("upsert provider session %s: %w", session.ID, err)
+	}
+	if err := requireOneAffected(res); err != nil {
+		if errors.Is(err, harnessstore.ErrNotFound) {
+			return fmt.Errorf("provider session %s is stale or bound to another account: %w", session.ID, harnessstore.ErrConflict)
+		}
+		return err
 	}
 	return nil
 }
