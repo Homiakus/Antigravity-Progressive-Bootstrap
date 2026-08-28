@@ -1,9 +1,12 @@
 package loop
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/homiakus/agctl/internal/engineering"
 	"github.com/homiakus/agctl/internal/model"
 	"github.com/homiakus/agctl/internal/paths"
 )
@@ -31,8 +34,21 @@ func testPaths(t *testing.T) paths.Paths {
 	return p
 }
 
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+}
+
 func TestStateLifecycle(t *testing.T) {
 	p := testPaths(t)
+	chdir(t, p.Home)
 	in := model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "c1"}, InitialNumSteps: 10}
 	st, err := EnsureTaskState(p, in)
 	if err != nil {
@@ -69,11 +85,71 @@ func TestStateLifecycle(t *testing.T) {
 
 func TestCompleteRequiresEvidence(t *testing.T) {
 	p := testPaths(t)
+	chdir(t, p.Home)
 	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "c"}, InitialNumSteps: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := MarkComplete(p, "c", st.TaskID, "done", nil); err == nil {
 		t.Fatal("expected verification error")
+	}
+}
+
+func TestCompletionInjectionIncludesLivingPlanProtocol(t *testing.T) {
+	msg := CompletionInjection("agctl", model.TaskState{ConversationID: "c", TaskID: "generated-task"})
+	for _, want := range []string{
+		"MASTER_PLAN.md is the only execution roadmap",
+		"SELECT exactly one T-XXX",
+		"Unexpected substantial problems",
+		"mutation",
+		"push-main",
+		"checkpoint",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("completion injection missing %q", want)
+		}
+	}
+}
+
+func TestManagedCompletionStoresPlanDigest(t *testing.T) {
+	p := testPaths(t)
+	workspace := t.TempDir()
+	chdir(t, workspace)
+	plan := "# MASTER PLAN\n\n### F-027 — process\n**Status:** Resolved.\n\n### T-027 — process\n**Status:** DONE.\n"
+	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed"}, InitialNumSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := []string{
+		"task:T-027",
+		"preflight:recorded",
+		"characterization:recorded",
+		"edge-space:recorded",
+		"tests:passed",
+		"mutation:passed semantic omission sentinel",
+		"race:n/a: no concurrent behavior changed",
+		"static:go vet passed",
+		"security:reviewed",
+		"compatibility:reviewed",
+		"performance:n/a: no hot path changed",
+		"findings:F-027",
+		"self-review:passed",
+		"plan-reconcile:updated",
+		"process-review:updated",
+		"push-main:verified",
+		"checkpoint:recorded",
+	}
+	if err := MarkComplete(p, "managed", st.TaskID, "done", evidence); err != nil {
+		t.Fatal(err)
+	}
+	done, ok, err := LoadState(p, "managed")
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if last := done.Verification[len(done.Verification)-1]; !strings.HasPrefix(last, "plan-digest:") {
+		t.Fatalf("missing plan digest: %v", done.Verification)
 	}
 }
