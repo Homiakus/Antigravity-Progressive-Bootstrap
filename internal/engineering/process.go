@@ -198,6 +198,18 @@ func validateManagedCompletion(path string, planBytes []byte, verification []str
 		return result, fmt.Errorf("living-plan completion evidence missing or empty: %s", strings.Join(missing, ", "))
 	}
 
+	pushValues := result.Categories["push-main"]
+	if len(pushValues) != 1 {
+		return result, fmt.Errorf("exactly one structured push-main evidence item is required")
+	}
+	if _, err := ParsePublicationProof(pushValues[0]); err != nil {
+		return result, fmt.Errorf("invalid push-main publication proof: %w", err)
+	}
+	checkpointValues := result.Categories["checkpoint"]
+	if len(checkpointValues) != 1 || !strings.EqualFold(strings.TrimSpace(checkpointValues[0]), "plan") {
+		return result, fmt.Errorf("managed checkpoint evidence must be exactly checkpoint:plan")
+	}
+
 	tasks, findings := parsePlanIDs(string(planBytes))
 	taskValues := result.Categories["task"]
 	if len(taskValues) != 1 {
@@ -228,6 +240,9 @@ func validateManagedCompletion(path string, planBytes []byte, verification []str
 		}
 	}
 	result.FindingIDs = uniqueSorted(result.FindingIDs)
+	if err := ValidatePlanCheckpoint(string(planBytes), result.TaskID); err != nil {
+		return result, err
+	}
 
 	sum := sha256.Sum256(planBytes)
 	result.PlanDigest = hex.EncodeToString(sum[:])
@@ -340,7 +355,13 @@ Verification ladder: formatter -> targeted tests -> targeted race/property/fuzz 
 
 Before completion perform adversarial architecture review, simplification/debt-deletion review, and process-improvement review (detection, prevention, feedback speed, automation, signal quality, test quality, planning, context). Reconcile MASTER_PLAN.md before completion.
 
-For a managed repository, agctl state complete requires categorized --verify evidence for: task, preflight, characterization, edge-space, tests, mutation, race, static, security, compatibility, performance, findings, self-review, plan-reconcile, process-review, push-main, checkpoint. Use explicit reasoned "n/a: ..." only when a gate is genuinely not applicable; bare n/a/none/skipped is rejected. findings must be "none: no unexpected substantial finding" or declared F-XXX IDs. task must be exactly one declared T-XXX whose plan status is DONE. The completion state is automatically bound to the SHA-256 digest of MASTER_PLAN.md.
+For a managed repository, agctl state complete requires categorized --verify evidence for: task, preflight, characterization, edge-space, tests, mutation, race, static, security, compatibility, performance, findings, self-review, plan-reconcile, process-review, push-main, checkpoint. Use explicit reasoned "n/a: ..." only when a gate is genuinely not applicable; bare n/a/none/skipped is rejected. findings must be "none: no unexpected substantial finding" or declared F-XXX IDs. task must be exactly one declared T-XXX whose plan status is DONE.
+
+push-main is not free text. After the qualified tree is committed and normally pushed, provide exactly:
+push-main:branch=main;head=<published commit>;remote=<remote name>;remote-head=<observed remote main commit>;base=<remote main before publication>;qualified-tree=<tree SHA that passed final qualification>;force=false
+The completion runtime independently observes the repository with read-only git commands and rejects branch/head/remote/tree mismatch, dirty state, force=true, or a base that is not an ancestor of the published head.
+
+checkpoint must be exactly checkpoint:plan. The latest "Context Compression Checkpoint" in MASTER_PLAN.md must describe the same T-XXX and contain the mandatory continuation fields. The completion state is automatically bound to the SHA-256 digest of that repository-resident plan/checkpoint.
 
 Never force-push. Never publish a knowingly broken/insecure/flaky/incomplete main. If main moved, inspect semantic overlap, integrate safely, re-run relevant verification, then normal push. External blockers block only the affected task; continue independent READY work. Stop only at convergence, universal external blockage, an unsafe non-inferable business decision, or explicit user stop.`
 }
