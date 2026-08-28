@@ -107,8 +107,15 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 		return old, err
 	}
 	// Stop-continue may start another invocation/execution while the task is still incomplete.
-	// Never overwrite an active incomplete state.
+	// Never overwrite an active incomplete state. Older state files did not persist
+	// workspace identity, so safely backfill it from the current invocation once.
 	if exists && !old.Complete && !old.HardBlocker {
+		if len(old.WorkspacePaths) == 0 && len(in.WorkspacePaths) > 0 {
+			old.WorkspacePaths = copyWorkspacePaths(in.WorkspacePaths)
+			if err := SaveState(p, old); err != nil {
+				return old, err
+			}
+		}
 		return old, nil
 	}
 	// If the last task completed, a larger trajectory size indicates a later user turn.
@@ -120,6 +127,7 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 	st := model.TaskState{
 		ConversationID:  in.ConversationID,
 		TaskID:          taskID,
+		WorkspacePaths:  copyWorkspacePaths(in.WorkspacePaths),
 		InitialNumSteps: in.InitialNumSteps,
 		StartedAt:       time.Now().Format(time.RFC3339Nano),
 		UpdatedAt:       time.Now().Format(time.RFC3339Nano),
@@ -129,6 +137,23 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 		return st, err
 	}
 	return st, nil
+}
+
+func copyWorkspacePaths(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func shortID(s string) string {
@@ -217,9 +242,9 @@ func MarkComplete(p paths.Paths, conversation, taskID, summary string, verificat
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("resolve completion workspace: %w", err)
+		return fmt.Errorf("resolve completion fallback workspace: %w", err)
 	}
-	validated, err := engineering.ValidateCompletion(cwd, clean)
+	validated, err := engineering.ValidateCompletionForWorkspaces(st.WorkspacePaths, cwd, clean)
 	if err != nil {
 		return err
 	}
