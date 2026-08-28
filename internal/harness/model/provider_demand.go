@@ -9,11 +9,13 @@ import (
 
 const MaxProviderDemandClassLength = 128
 
-// ProviderDemandDimensions binds one immutable provider usage event to the
-// categorical dimensions used by the demand estimator. UsageKey is the durable
-// idempotency key from ProviderUsageSample; the projection deliberately stores
-// only dimensions so amount/metric/provider identity cannot diverge from the
-// authoritative usage ledger.
+// ProviderDemandDimensions binds one canonical settled provider usage sample to
+// the categorical dimensions used by the demand estimator. Persistence admits
+// at most one canonical sample per assignment+metric; raw/intermediate usage
+// updates remain in the authoritative usage ledger but are not independent
+// training observations. UsageKey is the durable idempotency key from
+// ProviderUsageSample. The projection stores no amount/provider/model values, so
+// those facts cannot diverge from the authoritative usage ledger.
 type ProviderDemandDimensions struct {
 	UsageKey        string `json:"usageKey"`
 	TaskClass       string `json:"taskClass"`
