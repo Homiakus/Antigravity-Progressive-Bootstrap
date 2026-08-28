@@ -23,6 +23,7 @@ import (
 	remotedaemon "github.com/homiakus/agctl/internal/remote/daemon"
 	"github.com/homiakus/agctl/internal/remote/mirror"
 	"github.com/homiakus/agctl/internal/remote/model"
+	remoterequest "github.com/homiakus/agctl/internal/remote/request"
 	remotesession "github.com/homiakus/agctl/internal/remote/session"
 	remotesqlite "github.com/homiakus/agctl/internal/remote/store/sqlite"
 	"github.com/homiakus/agctl/internal/telegram"
@@ -154,11 +155,12 @@ func runRemoteDaemon(p paths.Paths, args []string) error {
 	if err != nil {
 		return err
 	}
+	requests := &remoterequest.Worker{Store: store, Provisioner: sessionService}
 	commands := &remotecommand.Worker{Store: store, Bridges: sessionService}
 	ingestor := &mirror.Ingestor{Store: store}
 	delivery := &mirror.TelegramWorker{Store: store, API: api}
 	supervisor, err := remotedaemon.New(remotedaemon.Options{
-		Telegram: poller, Commands: commands, Delivery: delivery, Ingestor: ingestor, Store: store, Bridges: sessionService, Tick: *tick,
+		Telegram: poller, Requests: requests, Commands: commands, Delivery: delivery, Ingestor: ingestor, Store: store, Bridges: sessionService, Tick: *tick,
 		ReportError: func(component string, err error) {
 			fmt.Fprintf(os.Stderr, "remote daemon %s: %v\n", component, err)
 		},
