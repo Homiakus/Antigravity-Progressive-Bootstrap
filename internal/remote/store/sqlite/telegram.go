@@ -52,7 +52,7 @@ func scanTelegramPrincipal(row scanner) (model.TelegramPrincipal,error) {
 
 func (s *Store) CreateTelegramPairing(ctx context.Context, pairing model.TelegramPairing) error {
 	if err := pairing.Validate(); err != nil { return err }
-	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_pairings(token_hash,role,intended_chat_id,created_at,expires_at,consumed_at,consumed_by_user_id,consumed_chat_id) VALUES(?,?,?,?,?,?,?,?,?)`, pairing.TokenHash, pairing.Role, pairing.IntendedChatID, formatTime(pairing.CreatedAt), formatTime(pairing.ExpiresAt), nil, nil, nil)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_pairings(token_hash,role,intended_chat_id,created_at,expires_at,consumed_at,consumed_by_user_id,consumed_chat_id) VALUES(?,?,?,?,?,?,?,?)`, pairing.TokenHash, pairing.Role, pairing.IntendedChatID, formatTime(pairing.CreatedAt), formatTime(pairing.ExpiresAt), nil, nil, nil)
 	if err != nil { return mapWriteError("create telegram pairing", err) }
 	return nil
 }
