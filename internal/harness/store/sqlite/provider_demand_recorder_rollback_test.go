@@ -16,15 +16,9 @@ func TestProviderDemandRecorderRollsBackUsageWhenDimensionsCannotBind(t *testing
 	db := openTestStore(t)
 	now := time.Unix(66000, 0).UTC()
 	seedProviderRuntimeParents(t, db, now)
-	assignment := harnessmodel.ProviderAssignment{
-		ID: "pasn_demand_rollback", AttemptID: testProviderAttemptID, AccountID: testProviderAccountID, ModelID: "model-a",
-		State: harnessmodel.ProviderAssignmentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CreateProviderAssignment(ctx, assignment) }); err != nil {
-		t.Fatal(err)
-	}
+	assignment, reservation := createSettledDemandReservation(t, db, now, "rollback", harnessmodel.QuotaMetricTokens)
 	usage := harnessmodel.ProviderUsageSample{
-		Key: "usage-demand-rollback", AssignmentID: assignment.ID, AccountID: assignment.AccountID,
+		Key: "usage-demand-rollback", AssignmentID: assignment.ID, ReservationID: reservation.ID, AccountID: assignment.AccountID,
 		Metric: harnessmodel.QuotaMetricTokens, Amount: 5, ObservedAt: now.Add(time.Second), CreatedAt: now.Add(time.Second),
 	}
 	dims := harnessmodel.ProviderDemandDimensions{UsageKey: usage.Key, TaskClass: "code", RepositoryClass: "small", ContextClass: "warm"}
