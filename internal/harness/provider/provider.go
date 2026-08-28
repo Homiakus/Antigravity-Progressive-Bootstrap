@@ -6,6 +6,23 @@ import (
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 )
 
+// Observation is one coherent provider-account snapshot. Adapters backed by a
+// single provider payload should expose SnapshotSource so persistence can avoid
+// torn reads across independently refreshed capacity/model/session methods.
+type Observation struct {
+	Capacity harnessmodel.ProviderCapacitySnapshot
+	Models   []harnessmodel.ProviderModelDescriptor
+	Sessions []harnessmodel.ProviderSessionSnapshot
+}
+
+// SnapshotSource exposes capacity, model and session observations derived from
+// the same provider payload/revision. It is optional for legacy/adapters whose
+// upstream APIs are inherently independent; ingestion should prefer it when
+// available.
+type SnapshotSource interface {
+	Observe(context.Context) (Observation, error)
+}
+
 // CapacitySource exposes the latest observable external capacity for one
 // provider account. It reports supply; workflow/user spending limits remain in
 // the harness budget subsystem.
