@@ -46,6 +46,12 @@ func TestProviderRuntimeDomainTransitionsAndNumericBounds(t *testing.T) {
 			}
 		})
 	}
+	fractionalReservation := reservation
+	fractionalReservation.Metric = QuotaMetricFraction
+	fractionalReservation.Amount = 1.01
+	if err := fractionalReservation.Validate(); err == nil {
+		t.Fatal("fractional reservation above 1 unexpectedly accepted")
+	}
 
 	usage := ProviderUsageSample{
 		Key: "usage-1", AssignmentID: assignment.ID, AccountID: assignment.AccountID,
@@ -57,6 +63,11 @@ func TestProviderRuntimeDomainTransitionsAndNumericBounds(t *testing.T) {
 	usage.Amount = math.NaN()
 	if err := usage.Validate(); err == nil {
 		t.Fatal("NaN usage unexpectedly accepted")
+	}
+	usage.Metric = QuotaMetricFraction
+	usage.Amount = 1.01
+	if err := usage.Validate(); err == nil {
+		t.Fatal("fractional usage above 1 unexpectedly accepted")
 	}
 
 	reservation.Amount = 1
