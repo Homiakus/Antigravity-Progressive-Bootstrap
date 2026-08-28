@@ -522,3 +522,109 @@ Antigravity bounded/tolerant observation adapter, coherent snapshot source, priv
 ## 21. Definition of Final Done
 
 No open Critical/High routing findings; Antigravity and Codex are first-class observation/execution providers; no guessed quota semantics, denominator, unit conversion or session/model attribution; coherent provider observations cannot tear across revisions; stale/pre-reset capacity cannot masquerade as current supply; durable routing history survives provider handoff; usage redelivery is idempotent; reservation arithmetic accounts for the complete active claim set; reservations cannot oversubscribe under races; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe interruption reaches existing `IN_DOUBT`; read-only and isolated-write rollout gates pass; only fenced Commit Coordinator writes main autonomously; no force push; CI/race/vet/mutation/benchmarks pass; routing is explainable; legacy duplicates removed; final re-audit finds no fundamental Critical/High issue; final verified tree and synchronized plan are on `main`.
+
+## 22. Living Engineering Process Integration
+
+This section extends the same execution source of truth with the self-improving engineering control loop. It is not a parallel roadmap. Product/provider tasks and process tasks are prioritized together by blocker severity, dependency leverage, architectural leverage, risk reduction and unlock value.
+
+### Process invariants
+
+- **I-028 Executable living-plan completion:** when a task workspace resolves to `MASTER_PLAN.md`, autonomous completion is accepted only with categorized evidence for task identity, pre-flight, characterization, edge-space, tests, mutation/test-of-tests, race, static analysis, security, compatibility, performance, findings, adversarial self-review, plan reconciliation, process review, verified normal main publication and context checkpoint. The selected `T-XXX` must exist and be `DONE`; referenced `F-XXX` identifiers must exist; bare `n/a`/`none`/`skipped` cannot satisfy a gate.
+- **I-029 Workspace-bound process authority:** engineering policy is resolved from the task's persisted workspace identity, never from ambient process cwd. Multiple workspaces below one living plan may share one task; workspaces resolving to multiple independent living plans fail closed and must be split.
+- **I-030 Plan revision binding:** successful managed completion stores a SHA-256 digest of the reviewed `MASTER_PLAN.md` in verification evidence so a checkpoint cannot silently refer to another plan revision.
+- **I-031 Coordinator/worker authority separation:** coordinator process instructions may reconcile/publish `main`; ordinary headless workers may characterize/implement/verify and report findings/checkpoints but must not receive autonomous `main` publication authority. This specializes, and never weakens, I-008/I-009.
+
+### Process findings
+
+### F-027 — Autonomous completion was prompt-only rather than executable
+**Status:** Resolved in T-027. **Category:** Engineering Process / Correctness. **Severity:** High. **Confidence:** Confirmed.  
+**Evidence:** prior `loop.MarkComplete` accepted any non-empty verification list, including a single arbitrary string.  
+**Observed behavior:** an agent could satisfy Stop/Completion after a partial iteration without a living-plan Task ID, characterization, adversarial review, mutation/race/security decision, reconciliation, main publication evidence or checkpoint.  
+**Root cause:** process semantics existed in instructions but had no typed/executable completion boundary.  
+**Impact/blast radius:** every autonomous interactive engineering iteration could become false-green.  
+**Resolution:** `internal/engineering` now validates categorized completion evidence, declared DONE task/finding linkage and plan digest; `CompletionInjection` embeds the mandatory living-plan process; semantic omission tests prove every required category is observable.
+
+### F-028 — Completion policy inferred repository identity from ambient cwd
+**Status:** Resolved in T-027. **Category:** Engineering Process / Boundary. **Severity:** High. **Confidence:** Confirmed by CI regression.  
+**Evidence:** first T-027 CI exposed synthetic task workspaces being governed by the agctl repository's `MASTER_PLAN.md` only because the test process cwd was the repository root.  
+**Observed behavior:** unrelated workspaces could inherit or bypass a living-plan policy based on launcher cwd.  
+**Expected behavior:** task workspace is the authority.  
+**Root cause:** completion resolution used `os.Getwd()` instead of persisted hook workspace identity.  
+**Resolution:** `TaskState` persists deduplicated `WorkspacePaths`; legacy active state can backfill them once; explicit unmanaged workspace does not inherit fallback cwd; multiple independent plans fail closed; hook lifecycle tests preserve workspace identity end to end.
+
+### F-029 — Monolithic full-suite gate delayed process failure localization
+**Status:** Resolved in T-027. **Category:** Meta Engineering / CI. **Severity:** Medium. **Confidence:** Confirmed.  
+**Evidence:** initial failures appeared only as `go test ./...` red after earlier unrelated gates had passed; package identity required log extraction and manual diagnosis.  
+**Root cause:** no cheap process-layer package gates preceded the full suite.  
+**Resolution:** Linux/Windows CI now runs `internal/engineering`, `internal/loop`, `internal/hooks`, and `internal/doctor` contract gates before the full suite, while retaining the authoritative full/race/vet/benchmark/Windows gates.
+
+### F-030 — One process prompt cannot safely govern both coordinator and ordinary workers
+**Status:** Planned. **Category:** Architecture / Authority. **Severity:** Critical. **Confidence:** Strong from I-008/F-007.  
+**Evidence:** the coordinator contract correctly requires reconciliation and verified push to `main`, while ordinary parallel workers are explicitly forbidden from autonomously writing `main`.  
+**Impact:** blindly injecting the coordinator contract into `planner.Enqueue` would create conflicting authority and reintroduce F-007.  
+**Recommended direction:** T-028 introduces role-aware coordinator/worker contracts and architecture tests before process propagation to headless execution.
+
+### Process tasks
+
+### T-027 — Enforce living-plan autonomous completion contract
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
+**Root cause:** process requirements were advisory text while the runtime completion gate accepted one arbitrary verification string.  
+**Pre-flight:** preserve unmanaged-repository compatibility; change only engineering/loop/task-state/test/CI surfaces; do not modify provider routing, persistence schema, public provider API or worker scheduling. Rollback is removal of the new engineering validator plus the additive `WorkspacePaths` state field.  
+**Changes:** new `internal/engineering` contract/plan resolver; full living-process injection into the coordinator completion loop; categorized evidence gate; plan Task/Finding validation; reasoned not-applicable semantics; SHA-256 plan binding; workspace identity persistence; fail-closed multi-plan resolution; targeted CI feedback ladder.  
+**Characterization/regression:** missing evidence categories, task not DONE, undeclared finding, bare `n/a`, ambient-cwd leakage and independent multi-plan ambiguity all have deterministic negative tests.  
+**Edge-space:** managed/unmanaged/legacy task state; one/shared/multiple plan roots; duplicate/empty workspace paths; DONE/non-DONE/unknown task; declared/undeclared/no findings; required evidence omission; Linux/Windows hook lifecycle.  
+**Mutation/test-of-tests:** deterministic omission sentinel removes each mandatory evidence class independently; every omission must make completion fail. This kills the semantic mutant class that deletes a required gate even without an external mutation binary.  
+**Verification:** qualification head `5d6807c4ae14b7efeea86dfaf84a4328ff47864e` — Linux process/loop/hooks/doctor targeted gates PASS; `go test ./...` PASS; `go test -race ./...` PASS; `go vet ./...` PASS; compiler/store/scheduler/retry/wait smoke benchmarks PASS; Windows targeted gates and full `go test ./...` PASS.  
+**Security:** strict policy only activates from the task's workspace plan; multiple plan authorities fail closed; no secret/network behavior added.  
+**Compatibility/performance:** unmanaged repositories retain legacy completion behavior; state JSON change is additive/omitempty; no hot-path algorithm changed and existing smoke benchmarks remain green.
+
+### T-028 — Introduce role-aware engineering contracts for headless execution
+**Status:** READY. **Priority:** P0. **Leverage:** HIGH.  
+Define explicit coordinator vs worker process roles. Coordinator owns task selection/reconciliation/publication/checkpoint; worker receives one delegated task/node, performs characterization/minimal implementation/verification/adversarial review, emits evidence/findings, and never pushes/integrates `main`. Inject worker contract into planner/task enqueue only after architecture tests prove no publication authority leaks. Dependencies: T-027. Addresses F-030 and reinforces F-007/I-008/I-031.
+
+### T-029 — Make publication/checkpoint evidence machine-verifiable
+**Status:** TODO. **Priority:** P1.  
+Replace free-form `push-main`/`checkpoint` assertions with repository-aware evidence: expected branch, local HEAD, observed remote-main HEAD, fast-forward relation, plan digest and durable continuation checkpoint. Fail closed on stale/moved main and preserve no-force policy. Dependencies: T-027,T-028. Complements T-018/T-019 rather than duplicating Commit Coordinator.
+
+### T-030 — Add structural `MASTER_PLAN.md` audit and process metrics
+**Status:** TODO. **Priority:** P1.  
+Executable audit for unique T/F IDs, allowed statuses, at most one coordinator `IN_PROGRESS` task per repository, declared dependencies, no unknown high findings, checkpoint recoverability and machine-readable engineering-loop metrics (failure classification, time-to-detect, flaky/mutation signals). Do not optimize metrics as targets. Dependencies: T-027,T-028.
+
+### Process dependency delta
+
+```text
+T027 DONE -> T028 role-aware contracts -> T029 publication/checkpoint proof
+                         |-> T030 structural plan/process audit
+T028 reinforces T018/T019 single-main-writer work and must not create a second commit coordinator.
+```
+
+### Iteration 9 — T-027
+**Selected task:** T-027.  
+**Why now:** the requested self-improving workflow could not be trusted while completion was advisory and false-green-able.  
+**Findings addressed:** F-027, F-028, F-029.  
+**Unexpected findings:** ambient cwd was an unsafe repository authority; a shared model-file edit was temporarily at risk of truncation during feature-branch work and was detected by diff review before publication, reinforcing protected-surface/diff checks; coordinator process text cannot be reused unchanged by workers because of I-008.  
+**Changes:** executable living-plan completion contract, workspace-bound task identity, plan digest binding, mutation omission sentinel, process/hook/doctor feedback ladder.  
+**Tests:** targeted engineering/loop/hooks/doctor; full unit/integration; race; vet; existing benchmark smoke; Windows targeted/full.  
+**Mutation:** semantic required-gate omission matrix PASS; external mutation engine deferred because T-027 has no installed mutation toolchain and the highest-risk contract mutation class is deterministically exercised.  
+**Plan changes:** I-028..I-031; F-027..F-029 resolved; F-030 recorded; T-027 DONE; T-028 NEXT; T-029/T-030 queued.  
+**Process improvements:** task policy now follows explicit workspace identity; process failures localize earlier; completion is plan/task/finding/digest bound; next process propagation is role-aware rather than prompt duplication.  
+**Commit:** publication commit containing this iteration record; authoritative SHA is the `main` HEAD for this revision.  
+**Push:** normal fast-forward only, never force.  
+**Result:** PASS after final publication gate.
+
+### Context Compression Checkpoint — after T-027
+
+`CURRENT QUALIFIED MILESTONE:` living-plan coordinator completion is executable and workspace-bound.  
+`ARCHITECTURE:` `internal/engineering` owns process validation; `internal/loop` owns conversation lifecycle/injection; hooks carry workspace identity; ordinary headless planner workers remain unchanged pending T-028.  
+`CRITICAL INVARIANTS:` I-008/I-009 and I-028..I-031.  
+`COMPLETED THIS ITERATION:` T-027.  
+`RESOLVED FINDINGS:` F-027,F-028,F-029.  
+`OPEN CRITICAL/HIGH PROCESS FINDINGS:` F-030 until T-028; existing F-007/F-014 remain architectural publication risks.  
+`BLOCKERS:` none for T-028.  
+`NEXT TASK:` T-028.  
+`WHY NEXT:` propagating the process to headless development without role separation would violate single-main-writer authority; role-aware contracts unlock safe system-wide adoption.  
+`CRITICAL FILES:` `internal/engineering/process.go`, `internal/loop/loop.go`, `internal/model/types.go`, `internal/hooks/hooks_test.go`, `internal/planner/planner.go`, `.github/workflows/harness-ci.yml`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` targeted process packages; `go test ./...`; `go test -race ./...`; `go vet ./...`; existing benchmark smoke; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` explicit task workspaces outrank cwd; multiple living plans fail closed; completion is digest-bound; coordinator and worker contracts must differ.  
+`REJECTED OPTIONS:` prompt-only process; ambient-cwd plan discovery for explicit workspaces; blindly injecting coordinator push-to-main instructions into ordinary workers; force publication.  
+`NEW PROCESS LEARNING:` process rules with high consequence need executable negative tests; CI should localize contract failures before the expensive full suite; protected-surface diff review catches tool-induced edit hazards before main.
