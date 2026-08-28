@@ -10,14 +10,15 @@ CREATE TABLE provider_demand_dimensions (
     task_class TEXT NOT NULL CHECK(length(task_class) BETWEEN 1 AND 128),
     repository_class TEXT NOT NULL CHECK(length(repository_class) BETWEEN 1 AND 128),
     context_class TEXT NOT NULL CHECK(length(context_class) BETWEEN 1 AND 128),
+    usage_observed_at_ns INTEGER NOT NULL,
     FOREIGN KEY(usage_key) REFERENCES provider_usage_samples(sample_key) ON DELETE CASCADE
 );
 
-CREATE INDEX provider_demand_dimensions_by_classes
-    ON provider_demand_dimensions(task_class, repository_class, context_class, usage_key);
+CREATE INDEX provider_demand_dimensions_by_classes_time
+    ON provider_demand_dimensions(task_class, repository_class, context_class, usage_observed_at_ns DESC, usage_key DESC);
 
-CREATE INDEX provider_usage_samples_by_model_metric_observed
-    ON provider_usage_samples(model_id, metric, observed_at DESC, sample_key DESC);
+CREATE INDEX provider_usage_samples_by_model_metric_account
+    ON provider_usage_samples(model_id, metric, account_id, sample_key);
 `,
 	})
 }
