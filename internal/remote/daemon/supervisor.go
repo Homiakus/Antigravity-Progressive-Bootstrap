@@ -15,11 +15,7 @@ type TelegramPoller interface {
 	Run(context.Context) error
 }
 
-type CommandWorker interface {
-	RunOnce(context.Context, int) (int, error)
-}
-
-type DeliveryWorker interface {
+type BatchWorker interface {
 	RunOnce(context.Context, int) (int, error)
 }
 
@@ -40,12 +36,14 @@ type ErrorReporter func(component string, err error)
 
 type Options struct {
 	Telegram       TelegramPoller
-	Commands       CommandWorker
-	Delivery       DeliveryWorker
+	Requests       BatchWorker
+	Commands       BatchWorker
+	Delivery       BatchWorker
 	Ingestor       MirrorIngestor
 	Store          SessionStore
 	Bridges        BridgeResolver
 	Tick           time.Duration
+	RequestBatch   int
 	CommandBatch   int
 	DeliveryBatch  int
 	ReportError    ErrorReporter
@@ -53,20 +51,22 @@ type Options struct {
 
 type Supervisor struct {
 	telegram      TelegramPoller
-	commands      CommandWorker
-	delivery      DeliveryWorker
+	requests      BatchWorker
+	commands      BatchWorker
+	delivery      BatchWorker
 	ingestor      MirrorIngestor
 	store         SessionStore
 	bridges       BridgeResolver
 	tick          time.Duration
+	requestBatch  int
 	commandBatch  int
 	deliveryBatch int
 	report        ErrorReporter
 }
 
 func New(opts Options) (*Supervisor, error) {
-	if opts.Telegram == nil || opts.Commands == nil || opts.Delivery == nil || opts.Ingestor == nil || opts.Store == nil || opts.Bridges == nil {
-		return nil, fmt.Errorf("remote daemon requires Telegram, command, mirror, store and Bridge components")
+	if opts.Telegram == nil || opts.Requests == nil || opts.Commands == nil || opts.Delivery == nil || opts.Ingestor == nil || opts.Store == nil || opts.Bridges == nil {
+		return nil, fmt.Errorf("remote daemon requires Telegram, request, command, mirror, store and Bridge components")
 	}
 	tick := opts.Tick
 	if tick <= 0 {
@@ -74,6 +74,10 @@ func New(opts Options) (*Supervisor, error) {
 	}
 	if tick < 100*time.Millisecond {
 		return nil, fmt.Errorf("remote daemon tick below 100ms is not supported")
+	}
+	requestBatch := opts.RequestBatch
+	if requestBatch <= 0 {
+		requestBatch = 10
 	}
 	commandBatch := opts.CommandBatch
 	if commandBatch <= 0 {
@@ -87,7 +91,11 @@ func New(opts Options) (*Supervisor, error) {
 	if report == nil {
 		report = func(string, error) {}
 	}
-	return &Supervisor{telegram: opts.Telegram, commands: opts.Commands, delivery: opts.Delivery, ingestor: opts.Ingestor, store: opts.Store, bridges: opts.Bridges, tick: tick, commandBatch: commandBatch, deliveryBatch: deliveryBatch, report: report}, nil
+	return &Supervisor{
+		telegram: opts.Telegram, requests: opts.Requests, commands: opts.Commands, delivery: opts.Delivery,
+		ingestor: opts.Ingestor, store: opts.Store, bridges: opts.Bridges, tick: tick,
+		requestBatch: requestBatch, commandBatch: commandBatch, deliveryBatch: deliveryBatch, report: report,
+	}, nil
 }
 
 func (s *Supervisor) Run(ctx context.Context) error {
@@ -120,6 +128,9 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 func (s *Supervisor) cycle(ctx context.Context) error {
 	var errs []error
+	if _, err := s.requests.RunOnce(ctx, s.requestBatch); err != nil {
+		errs = append(errs, fmt.Errorf("requests: %w", err))
+	}
 	if _, err := s.commands.RunOnce(ctx, s.commandBatch); err != nil {
 		errs = append(errs, fmt.Errorf("commands: %w", err))
 	}
