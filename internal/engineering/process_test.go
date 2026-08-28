@@ -22,14 +22,7 @@ func writePlan(t *testing.T, root, taskStatus string) {
 
 ### Context Compression Checkpoint — after T-027
 
-` + "`CURRENT QUALIFIED MILESTONE:` managed completion proof.  \n" +
-		"`CRITICAL INVARIANTS:` I-028,I-029.  \n" +
-		"`COMPLETED THIS ITERATION:` T-027.  \n" +
-		"`NEXT TASK:` T-028.  \n" +
-		"`WHY NEXT:` role isolation.  \n" +
-		"`VERIFICATION COMMANDS:` go test ./....  \n" +
-		"`IMPORTANT DECISIONS:` repository evidence is authoritative.  \n" +
-		"`NEW PROCESS LEARNING:` completion claims must be observable.\n"
+` + checkpointFields("T-027")
 	if err := os.WriteFile(filepath.Join(root, PlanFileName), []byte(plan), 0o644); err != nil {
 		t.Fatal(err)
 	}
