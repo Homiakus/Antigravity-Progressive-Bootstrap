@@ -70,6 +70,11 @@ func (r Request) Validate() error {
 	if r.Now.IsZero() {
 		return fmt.Errorf("provider demand estimate now is required")
 	}
+	if err := (harnessmodel.ProviderDemandDimensions{
+		UsageKey: "estimate", TaskClass: r.TaskClass, RepositoryClass: r.RepositoryClass, ContextClass: r.ContextClass,
+	}).Validate(); err != nil {
+		return fmt.Errorf("provider demand estimate dimensions: %w", err)
+	}
 	probe := harnessmodel.ProviderDemandHistoryQuery{
 		Provider: r.Provider, ModelID: r.ModelID, Metric: r.Metric,
 		TaskClass: r.TaskClass, RepositoryClass: r.RepositoryClass, ContextClass: r.ContextClass,
@@ -79,16 +84,16 @@ func (r Request) Validate() error {
 }
 
 type Estimate struct {
-	Provider          harnessmodel.ProviderKind      `json:"provider"`
-	ModelID           harnessmodel.ProviderModelID   `json:"modelId"`
-	Metric            harnessmodel.QuotaMetricKind   `json:"metric"`
-	MatchLevel        MatchLevel                     `json:"matchLevel"`
-	SamplesUsed       int                            `json:"samplesUsed"`
-	P50               float64                        `json:"p50"`
-	P80               float64                        `json:"p80"`
-	ReservationAmount float64                        `json:"reservationAmount"`
-	OldestObservedAt  time.Time                      `json:"oldestObservedAt"`
-	NewestObservedAt  time.Time                      `json:"newestObservedAt"`
+	Provider          harnessmodel.ProviderKind    `json:"provider"`
+	ModelID           harnessmodel.ProviderModelID `json:"modelId"`
+	Metric            harnessmodel.QuotaMetricKind `json:"metric"`
+	MatchLevel        MatchLevel                   `json:"matchLevel"`
+	SamplesUsed       int                          `json:"samplesUsed"`
+	P50               float64                      `json:"p50"`
+	P80               float64                      `json:"p80"`
+	ReservationAmount float64                      `json:"reservationAmount"`
+	OldestObservedAt  time.Time                    `json:"oldestObservedAt"`
+	NewestObservedAt  time.Time                    `json:"newestObservedAt"`
 }
 
 type HistorySource interface {
