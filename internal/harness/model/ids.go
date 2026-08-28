@@ -23,22 +23,30 @@ type TimerID string
 type SignalID string
 type ApprovalID string
 type EffectIntentID string
+type ProviderAccountID string
+type ProviderSessionID string
+type ProviderAssignmentID string
+type ProviderReservationID string
 
 type IDKind string
 
 const (
-	IDWorkflowDefinition IDKind = "wfd"
-	IDWorkflowRun        IDKind = "wfr"
-	IDNodeRun            IDKind = "nr"
-	IDAttempt            IDKind = "att"
-	IDWorker             IDKind = "wrk"
-	IDLease              IDKind = "lea"
-	IDArtifact           IDKind = "art"
-	IDEvent              IDKind = "evt"
-	IDTimer              IDKind = "tmr"
-	IDSignal             IDKind = "sig"
-	IDApproval           IDKind = "apr"
-	IDEffectIntent       IDKind = "eff"
+	IDWorkflowDefinition  IDKind = "wfd"
+	IDWorkflowRun         IDKind = "wfr"
+	IDNodeRun             IDKind = "nr"
+	IDAttempt             IDKind = "att"
+	IDWorker              IDKind = "wrk"
+	IDLease               IDKind = "lea"
+	IDArtifact            IDKind = "art"
+	IDEvent               IDKind = "evt"
+	IDTimer               IDKind = "tmr"
+	IDSignal              IDKind = "sig"
+	IDApproval            IDKind = "apr"
+	IDEffectIntent        IDKind = "eff"
+	IDProviderAccount     IDKind = "pacc"
+	IDProviderSession     IDKind = "pses"
+	IDProviderAssignment  IDKind = "pasn"
+	IDProviderReservation IDKind = "pres"
 )
 
 var (
@@ -58,7 +66,6 @@ type TimeSortableIDGenerator struct {
 func NewIDGenerator() TimeSortableIDGenerator {
 	return TimeSortableIDGenerator{Now: time.Now, Random: rand.Reader}
 }
-
 func (g TimeSortableIDGenerator) New(kind IDKind) (string, error) {
 	if !validIDKind(kind) {
 		return "", fmt.Errorf("unknown id kind %q", kind)
@@ -77,16 +84,14 @@ func (g TimeSortableIDGenerator) New(kind IDKind) (string, error) {
 	}
 	return fmt.Sprintf("%s_%013d_%s", kind, now().UTC().UnixMilli(), hex.EncodeToString(entropy[:])), nil
 }
-
 func validIDKind(kind IDKind) bool {
 	switch kind {
-	case IDWorkflowDefinition, IDWorkflowRun, IDNodeRun, IDAttempt, IDWorker, IDLease, IDArtifact, IDEvent, IDTimer, IDSignal, IDApproval, IDEffectIntent:
+	case IDWorkflowDefinition, IDWorkflowRun, IDNodeRun, IDAttempt, IDWorker, IDLease, IDArtifact, IDEvent, IDTimer, IDSignal, IDApproval, IDEffectIntent, IDProviderAccount, IDProviderSession, IDProviderAssignment, IDProviderReservation:
 		return true
 	default:
 		return false
 	}
 }
-
 func ValidateGeneratedID(id string, kind IDKind) error {
 	if !validIDKind(kind) {
 		return fmt.Errorf("unknown id kind %q", kind)
@@ -99,7 +104,6 @@ func ValidateGeneratedID(id string, kind IDKind) error {
 	}
 	return nil
 }
-
 func ValidateNodeID(id NodeID) error {
 	if !nodeIDRE.MatchString(string(id)) {
 		return fmt.Errorf("invalid node id %q", id)
