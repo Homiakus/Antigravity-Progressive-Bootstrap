@@ -13,10 +13,10 @@ import (
 
 type fakePoller struct{}
 func(fakePoller)Run(ctx context.Context)error{<-ctx.Done();return ctx.Err()}
-type fakeBatch struct{calls int}
-func(f *fakeBatch)RunOnce(context.Context,int)(int,error){f.calls++;return 1,nil}
-type fakeIngestor struct{calls int}
-func(f *fakeIngestor)PollSession(context.Context,mirror.EventClient,model.RemoteSessionID)(int,error){f.calls++;return 1,nil}
+type fakeBatch struct{calls int; order *[]string; name string}
+func(f *fakeBatch)RunOnce(context.Context,int)(int,error){f.calls++;if f.order!=nil{*f.order=append(*f.order,f.name)};return 1,nil}
+type fakeIngestor struct{calls int; order *[]string}
+func(f *fakeIngestor)PollSession(context.Context,mirror.EventClient,model.RemoteSessionID)(int,error){f.calls++;if f.order!=nil{*f.order=append(*f.order,"mirror")};return 1,nil}
 type fakeStore struct{instance model.InstanceMirror;session model.RemoteSession}
 func(f fakeStore)ListInstances(context.Context)([]model.InstanceMirror,error){return []model.InstanceMirror{f.instance},nil}
 func(f fakeStore)ListSessionsByInstance(context.Context,model.InstanceID,bool)([]model.RemoteSession,error){return []model.RemoteSession{f.session},nil}
@@ -33,12 +33,16 @@ func(fakeClient)SendMessage(context.Context,string,string)error{return nil}
 func(fakeClient)OpenWorkspace(context.Context,string)(antigravityide.OpenWorkspaceResult,error){return antigravityide.OpenWorkspaceResult{},nil}
 func(fakeClient)Events(context.Context,string,uint64)([]antigravityide.BridgeEvent,error){return []antigravityide.BridgeEvent{{Seq:1,Type:"agent_delta",SourceEventID:"e",StreamKey:"s",Timestamp:time.Unix(1,0).UTC(),Payload:json.RawMessage(`{"conversationId":"p","stepIndex":1,"text":"x","final":false}`)}},nil}
 
-func TestCycleRunsCommandsMirrorAndDelivery(t *testing.T){
-	commands:=&fakeBatch{};delivery:=&fakeBatch{};ingestor:=&fakeIngestor{}
+func TestCycleRunsRequestsBeforeCommandsMirrorAndDelivery(t *testing.T){
+	var order []string
+	requests:=&fakeBatch{order:&order,name:"requests"};commands:=&fakeBatch{order:&order,name:"commands"};delivery:=&fakeBatch{order:&order,name:"delivery"};ingestor:=&fakeIngestor{order:&order}
 	instance:=model.InstanceMirror{ID:"instance-a"}
 	session:=model.RemoteSession{ID:"rsi_1700000000000_00000000000000000001",CockpitInstanceID:"instance-a",ObservedState:model.SessionReady,DesiredState:model.SessionDesiredReady}
-	s,err:=New(Options{Telegram:fakePoller{},Commands:commands,Delivery:delivery,Ingestor:ingestor,Store:fakeStore{instance:instance,session:session},Bridges:fakeResolver{bridge:antigravityide.LocatedBridge{Client:fakeClient{}}}})
+	s,err:=New(Options{Telegram:fakePoller{},Requests:requests,Commands:commands,Delivery:delivery,Ingestor:ingestor,Store:fakeStore{instance:instance,session:session},Bridges:fakeResolver{bridge:antigravityide.LocatedBridge{Client:fakeClient{}}}})
 	if err!=nil{t.Fatal(err)}
 	if err:=s.cycle(context.Background());err!=nil{t.Fatal(err)}
-	if commands.calls!=1||delivery.calls!=1||ingestor.calls!=1{t.Fatalf("calls commands=%d delivery=%d ingest=%d",commands.calls,delivery.calls,ingestor.calls)}
+	if requests.calls!=1||commands.calls!=1||delivery.calls!=1||ingestor.calls!=1{t.Fatalf("calls requests=%d commands=%d delivery=%d ingest=%d",requests.calls,commands.calls,delivery.calls,ingestor.calls)}
+	want:=[]string{"requests","commands","mirror","delivery"}
+	if len(order)!=len(want){t.Fatalf("order=%v",order)}
+	for i:=range want{if order[i]!=want[i]{t.Fatalf("order=%v want=%v",order,want)}}
 }
