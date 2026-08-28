@@ -128,6 +128,9 @@ func (r ProviderReservation) Validate() error {
 	if math.IsNaN(r.Amount) || math.IsInf(r.Amount, 0) || r.Amount <= 0 {
 		return fmt.Errorf("provider reservation amount must be finite and positive")
 	}
+	if r.Metric == QuotaMetricFraction && r.Amount > 1 {
+		return fmt.Errorf("fractional provider reservation amount must be within (0,1]")
+	}
 	if !r.State.Valid() {
 		return fmt.Errorf("invalid provider reservation state %q", r.State)
 	}
@@ -169,6 +172,9 @@ func (s ProviderUsageSample) Validate() error {
 	if math.IsNaN(s.Amount) || math.IsInf(s.Amount, 0) || s.Amount < 0 {
 		return fmt.Errorf("provider usage amount must be finite and non-negative")
 	}
+	if s.Metric == QuotaMetricFraction && s.Amount > 1 {
+		return fmt.Errorf("fractional provider usage amount must be within [0,1]")
+	}
 	if s.ObservedAt.IsZero() || s.CreatedAt.IsZero() {
 		return fmt.Errorf("provider usage timestamps are required")
 	}
@@ -180,15 +186,15 @@ func (s ProviderUsageSample) Validate() error {
 // fence, mirroring the existing service circuit breaker semantics without
 // conflating the two scopes.
 type ProviderCircuitState struct {
-	AccountID            ProviderAccountID `json:"accountId"`
-	ModelID              ProviderModelID   `json:"modelId,omitempty"`
-	Revision             uint64            `json:"revision"`
-	State                CircuitState      `json:"state"`
-	ConsecutiveFailures  int               `json:"consecutiveFailures"`
-	OpenedAt             time.Time         `json:"openedAt,omitempty"`
-	NextProbeAt          time.Time         `json:"nextProbeAt,omitempty"`
-	ProbeInFlight        bool              `json:"probeInFlight,omitempty"`
-	UpdatedAt            time.Time         `json:"updatedAt"`
+	AccountID           ProviderAccountID `json:"accountId"`
+	ModelID             ProviderModelID   `json:"modelId,omitempty"`
+	Revision            uint64            `json:"revision"`
+	State               CircuitState      `json:"state"`
+	ConsecutiveFailures int               `json:"consecutiveFailures"`
+	OpenedAt            time.Time         `json:"openedAt,omitempty"`
+	NextProbeAt         time.Time         `json:"nextProbeAt,omitempty"`
+	ProbeInFlight       bool              `json:"probeInFlight,omitempty"`
+	UpdatedAt           time.Time         `json:"updatedAt"`
 }
 
 func (s ProviderCircuitState) Validate() error {
