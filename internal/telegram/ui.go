@@ -2,39 +2,523 @@ package telegram
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/homiakus/agctl/internal/cockpit"
 	"github.com/homiakus/agctl/internal/remote/model"
 )
 
-const uiPageSize=6
+const uiPageSize = 6
 
-type UIStore interface { ListRepositories(context.Context,bool)([]model.Repository,error); ListInstances(context.Context)([]model.InstanceMirror,error); ListSessionsByInstance(context.Context,model.InstanceID,bool)([]model.RemoteSession,error); GetSession(context.Context,model.RemoteSessionID)(model.RemoteSession,error); GetRepository(context.Context,model.RepositoryID)(model.Repository,error); GetConversation(context.Context,model.ConversationID)(model.Conversation,error); GetInstance(context.Context,model.InstanceID)(model.InstanceMirror,error) }
-type UIAccounts interface { Accounts(context.Context)([]cockpit.Account,error) }
-type UIHandler interface { HandleCommand(context.Context,Message,model.TelegramPrincipal)(bool,error); HandleCallback(context.Context,CallbackQuery,model.TelegramPrincipal)(bool,error) }
-type UI struct { api ViewAPI; store UIStore; accounts UIAccounts }
-func NewUI(api ViewAPI,store UIStore,accounts UIAccounts)(*UI,error){if api==nil||store==nil{return nil,fmt.Errorf("telegram UI API and store are required")};return &UI{api:api,store:store,accounts:accounts},nil}
+type UIStore interface {
+	ListRepositories(context.Context, bool) ([]model.Repository, error)
+	ListInstances(context.Context) ([]model.InstanceMirror, error)
+	ListSessionsByInstance(context.Context, model.InstanceID, bool) ([]model.RemoteSession, error)
+	GetSession(context.Context, model.RemoteSessionID) (model.RemoteSession, error)
+	GetRepository(context.Context, model.RepositoryID) (model.Repository, error)
+	GetConversation(context.Context, model.ConversationID) (model.Conversation, error)
+	GetInstance(context.Context, model.InstanceID) (model.InstanceMirror, error)
+	AdmitSessionRequest(context.Context, model.RemoteSessionRequest) (model.RemoteSessionRequest, bool, error)
+}
 
-func(u *UI)HandleCommand(ctx context.Context,message Message,principal model.TelegramPrincipal)(bool,error){fields:=strings.Fields(strings.TrimSpace(message.Text));if len(fields)==0{return false,nil};cmd:=strings.ToLower(strings.SplitN(fields[0],"@",2)[0]);var view View;var err error;switch cmd{case "/start","/home":view,err=u.home(ctx,principal);case "/projects":view,err=u.projects(ctx,0);case "/sessions":view,err=u.sessions(ctx,0,principal);case "/instances":view,err=u.instances(ctx);case "/accounts":view,err=u.accountsView(ctx);default:return false,nil};if err!=nil{return true,err};_,err=u.api.SendView(ctx,message.Chat.ID,message.MessageThreadID,view);return true,err}
-func(u *UI)HandleCallback(ctx context.Context,query CallbackQuery,principal model.TelegramPrincipal)(bool,error){if query.Message==nil||!strings.HasPrefix(query.Data,"u1|"){return false,nil};parts:=strings.Split(query.Data,"|");var view View;var err error;switch{case len(parts)==2&&parts[1]=="home":view,err=u.home(ctx,principal);case len(parts)==3&&parts[1]=="projects":view,err=u.projects(ctx,parsePage(parts[2]));case len(parts)==3&&parts[1]=="sessions":view,err=u.sessions(ctx,parsePage(parts[2]),principal);case len(parts)==2&&parts[1]=="instances":view,err=u.instances(ctx);case len(parts)==2&&parts[1]=="accounts":view,err=u.accountsView(ctx);case len(parts)==3&&parts[1]=="project":view,err=u.project(ctx,model.RepositoryID(parts[2]),principal);case len(parts)==3&&parts[1]=="session":view,err=u.session(ctx,model.RemoteSessionID(parts[2]),principal);default:return false,nil};if err!=nil{return true,err};if err:=u.api.EditView(ctx,query.Message.Chat.ID,query.Message.MessageID,view);err!=nil{return true,err};_ = u.api.AnswerCallback(ctx,query.ID,"Updated");return true,nil}
+type UIAccounts interface {
+	Accounts(context.Context) ([]cockpit.Account, error)
+}
 
-func(u *UI)home(ctx context.Context,p model.TelegramPrincipal)(View,error){instances,err:=u.store.ListInstances(ctx);if err!=nil{return View{},err};sessions,err:=u.allSessions(ctx,instances);if err!=nil{return View{},err};ready,attention,active:=0,0,0;for _,i:=range instances{if i.ObservedState==model.InstanceReady{ready++}};for _,s:=range sessions{if s.ObservedState!=model.SessionClosed{active++};if s.ObservedState==model.SessionNeedsAttention||s.ObservedState==model.SessionDegraded{attention++}};text:=fmt.Sprintf("Antigravity Remote\n\nIDE ready: %d/%d\nActive sessions: %d\nNeeds attention: %d\nRole: %s",ready,len(instances),active,attention,p.Role);return View{Text:text,Keyboard:keyboard([][]buttonSpec{{{"Projects","u1|projects|0"},{"Sessions","u1|sessions|0"}},{{"Instances","u1|instances"},{"Accounts","u1|accounts"}}})},nil}
-func(u *UI)projects(ctx context.Context,page int)(View,error){repos,err:=u.store.ListRepositories(ctx,true);if err!=nil{return View{},err};sort.Slice(repos,func(i,j int)bool{return strings.ToLower(repos[i].Name)<strings.ToLower(repos[j].Name)});start,end,page:=pageBounds(len(repos),page);var b strings.Builder;fmt.Fprintf(&b,"Projects (%d)\n",len(repos));rows:=[][]buttonSpec{};for _,r:=range repos[start:end]{fmt.Fprintf(&b,"\n• %s\n  %s",r.Name,r.CanonicalPath);rows=append(rows,[]buttonSpec{{r.Name,"u1|project|"+string(r.ID)}})};rows=append(rows,pager("projects",page,len(repos)));rows=append(rows,[]buttonSpec{{"Home","u1|home"}});return View{Text:b.String(),Keyboard:keyboard(rows)},nil}
-func(u *UI)sessions(ctx context.Context,page int,p model.TelegramPrincipal)(View,error){instances,err:=u.store.ListInstances(ctx);if err!=nil{return View{},err};items,err:=u.allSessions(ctx,instances);if err!=nil{return View{},err};sort.Slice(items,func(i,j int)bool{return items[i].UpdatedAt.After(items[j].UpdatedAt)});start,end,page:=pageBounds(len(items),page);var b strings.Builder;fmt.Fprintf(&b,"Sessions (%d)\n",len(items));rows:=[][]buttonSpec{};for _,s:=range items[start:end]{repo,_:=u.store.GetRepository(ctx,s.RepositoryID);label:=repo.Name;if label==""{label=string(s.ID)};fmt.Fprintf(&b,"\n• %s — %s",label,s.ObservedState);rows=append(rows,[]buttonSpec{{label,"u1|session|"+string(s.ID)}})};rows=append(rows,pager("sessions",page,len(items)));rows=append(rows,[]buttonSpec{{"Home","u1|home"}});_ = p;return View{Text:b.String(),Keyboard:keyboard(rows)},nil}
-func(u *UI)instances(ctx context.Context)(View,error){items,err:=u.store.ListInstances(ctx);if err!=nil{return View{},err};var b strings.Builder;fmt.Fprintf(&b,"IDE instances (%d)\n",len(items));for _,i:=range items{fmt.Fprintf(&b,"\n• %s [%s]\n  workspace: %s",fallback(i.Name,string(i.ID)),i.ObservedState,i.WorkingDir)};return View{Text:b.String(),Keyboard:keyboard([][]buttonSpec{{{"Home","u1|home"}}})},nil}
-func(u *UI)accountsView(ctx context.Context)(View,error){if u.accounts==nil{return View{Text:"Accounts\n\nAccount source is not configured.",Keyboard:keyboard([][]buttonSpec{{{"Home","u1|home"}}})},nil};items,err:=u.accounts.Accounts(ctx);if err!=nil{return View{},err};var b strings.Builder;fmt.Fprintf(&b,"Accounts (%d)\n",len(items));for _,a:=range items{status:="ready";if a.Disabled{status="disabled"};fmt.Fprintf(&b,"\n• %s — %s",maskEmail(a.Email),status)};return View{Text:b.String(),Keyboard:keyboard([][]buttonSpec{{{"Home","u1|home"}}})},nil}
-func(u *UI)project(ctx context.Context,id model.RepositoryID,p model.TelegramPrincipal)(View,error){repo,err:=u.store.GetRepository(ctx,id);if err!=nil{return View{},err};instances,err:=u.store.ListInstances(ctx);if err!=nil{return View{},err};all,err:=u.allSessions(ctx,instances);if err!=nil{return View{},err};var b strings.Builder;fmt.Fprintf(&b,"Project: %s\n\nPath: %s\nDefault branch: %s",repo.Name,repo.CanonicalPath,fallback(repo.DefaultBranch,"—"));rows:=[][]buttonSpec{};for _,s:=range all{if s.RepositoryID==id&&s.ObservedState!=model.SessionClosed{fmt.Fprintf(&b,"\n\nSession: %s",s.ObservedState);rows=append(rows,[]buttonSpec{{"Open session","u1|session|"+string(s.ID)}})}};rows=append(rows,[]buttonSpec{{"Projects","u1|projects|0"},{"Home","u1|home"}});_ = p;return View{Text:b.String(),Keyboard:keyboard(rows)},nil}
-func(u *UI)session(ctx context.Context,id model.RemoteSessionID,p model.TelegramPrincipal)(View,error){s,err:=u.store.GetSession(ctx,id);if err!=nil{return View{},err};repo,err:=u.store.GetRepository(ctx,s.RepositoryID);if err!=nil{return View{},err};conv,err:=u.store.GetConversation(ctx,s.ConversationID);if err!=nil{return View{},err};inst,err:=u.store.GetInstance(ctx,s.CockpitInstanceID);if err!=nil{return View{},err};text:=fmt.Sprintf("Session\n\nProject: %s\nState: %s\nIDE: %s\nConversation: %s\nIsolation: %s\nWorkspace: %s",repo.Name,s.ObservedState,inst.ObservedState,fallback(conv.Title,conv.ProviderConversationID),s.IsolationMode,s.WorkspacePath);rows:=[][]buttonSpec{};if roleRank(p.Role)>=roleRank(model.TelegramRoleOperator){rows=append(rows,[]buttonSpec{{"Pause","r1|pause|"+string(s.ID)},{"Resume","r1|resume|"+string(s.ID)}},[]buttonSpec{{"Cancel agent","r1|cancel|"+string(s.ID)}})};if p.Role==model.TelegramRoleOwner{rows=append(rows,[]buttonSpec{{"Close session","r1|close|"+string(s.ID)}})};rows=append(rows,[]buttonSpec{{"Sessions","u1|sessions|0"},{"Home","u1|home"}});return View{Text:text,Keyboard:keyboard(rows)},nil}
-func(u *UI)allSessions(ctx context.Context,instances []model.InstanceMirror)([]model.RemoteSession,error){var out []model.RemoteSession;for _,i:=range instances{items,err:=u.store.ListSessionsByInstance(ctx,i.ID,false);if err!=nil{return nil,err};out=append(out,items...)};return out,nil}
+type UIHandler interface {
+	HandleCommand(context.Context, Message, model.TelegramPrincipal) (bool, error)
+	HandleCallback(context.Context, CallbackQuery, model.TelegramPrincipal) (bool, error)
+}
 
-type buttonSpec struct{text,data string}
-func keyboard(rows [][]buttonSpec)InlineKeyboardMarkup{out:=InlineKeyboardMarkup{};for _,row:=range rows{if len(row)==0{continue};buttons:=make([]InlineKeyboardButton,0,len(row));for _,b:=range row{if b.text==""||b.data==""||len([]byte(b.data))>64{continue};buttons=append(buttons,InlineKeyboardButton{Text:b.text,CallbackData:b.data})};if len(buttons)>0{out.InlineKeyboard=append(out.InlineKeyboard,buttons)}};return out}
-func pager(section string,page,total int)[]buttonSpec{pages:=(total+uiPageSize-1)/uiPageSize;if pages<=1{return nil};var out []buttonSpec;if page>0{out=append(out,buttonSpec{"‹ Prev",fmt.Sprintf("u1|%s|%d",section,page-1)})};if page+1<pages{out=append(out,buttonSpec{"Next ›",fmt.Sprintf("u1|%s|%d",section,page+1)})};return out}
-func pageBounds(total,page int)(int,int,int){pages:=(total+uiPageSize-1)/uiPageSize;if pages<1{pages=1};if page<0{page=0};if page>=pages{page=pages-1};start:=page*uiPageSize;end:=start+uiPageSize;if end>total{end=total};return start,end,page}
-func parsePage(s string)int{n,err:=strconv.Atoi(s);if err!=nil||n<0{return 0};return n}
-func fallback(v,alt string)string{if strings.TrimSpace(v)==""{return alt};return v}
-func maskEmail(email string)string{email=strings.TrimSpace(email);at:=strings.IndexByte(email,'@');if at<=0{return fallback(email,"unknown")};local,domain:=email[:at],email[at+1:];if len(local)>2{local=local[:2]+"***"};return local+"@"+domain}
+type UI struct {
+	api      ViewAPI
+	store    UIStore
+	accounts UIAccounts
+}
+
+func NewUI(api ViewAPI, store UIStore, accounts UIAccounts) (*UI, error) {
+	if api == nil || store == nil {
+		return nil, fmt.Errorf("telegram UI API and store are required")
+	}
+	return &UI{api: api, store: store, accounts: accounts}, nil
+}
+
+func (u *UI) HandleCommand(ctx context.Context, message Message, principal model.TelegramPrincipal) (bool, error) {
+	fields := strings.Fields(strings.TrimSpace(message.Text))
+	if len(fields) == 0 {
+		return false, nil
+	}
+	cmd := strings.ToLower(strings.SplitN(fields[0], "@", 2)[0])
+	var view View
+	var err error
+	switch cmd {
+	case "/start", "/home":
+		view, err = u.home(ctx, principal)
+	case "/projects":
+		view, err = u.projects(ctx, 0)
+	case "/sessions":
+		view, err = u.sessions(ctx, 0, principal)
+	case "/instances":
+		view, err = u.instances(ctx)
+	case "/accounts":
+		view, err = u.accountsView(ctx)
+	default:
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	_, err = u.api.SendView(ctx, message.Chat.ID, message.MessageThreadID, view)
+	return true, err
+}
+
+func (u *UI) HandleCallback(ctx context.Context, query CallbackQuery, principal model.TelegramPrincipal) (bool, error) {
+	if query.Message == nil {
+		return false, nil
+	}
+	parts := strings.Split(query.Data, "|")
+	var view View
+	var err error
+	switch {
+	case len(parts) == 2 && parts[0] == "u1" && parts[1] == "home":
+		view, err = u.home(ctx, principal)
+	case len(parts) == 3 && parts[0] == "u1" && parts[1] == "projects":
+		view, err = u.projects(ctx, parsePage(parts[2]))
+	case len(parts) == 3 && parts[0] == "u1" && parts[1] == "sessions":
+		view, err = u.sessions(ctx, parsePage(parts[2]), principal)
+	case len(parts) == 2 && parts[0] == "u1" && parts[1] == "instances":
+		view, err = u.instances(ctx)
+	case len(parts) == 2 && parts[0] == "u1" && parts[1] == "accounts":
+		view, err = u.accountsView(ctx)
+	case len(parts) == 3 && parts[0] == "u1" && parts[1] == "project":
+		view, err = u.project(ctx, model.RepositoryID(parts[2]), principal)
+	case len(parts) == 3 && parts[0] == "u1" && parts[1] == "session":
+		view, err = u.session(ctx, model.RemoteSessionID(parts[2]), principal)
+	case len(parts) == 4 && parts[0] == "u2" && parts[1] == "accounts":
+		view, err = u.openAccounts(ctx, model.RepositoryID(parts[2]), parsePage(parts[3]), principal)
+	case len(parts) == 4 && parts[0] == "u2" && parts[1] == "open":
+		view, err = u.queueOpen(ctx, model.RepositoryID(parts[2]), parts[3], query, principal)
+	default:
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	if err := u.api.EditView(ctx, query.Message.Chat.ID, query.Message.MessageID, view); err != nil {
+		return true, err
+	}
+	_ = u.api.AnswerCallback(ctx, query.ID, "Updated")
+	return true, nil
+}
+
+func (u *UI) home(ctx context.Context, p model.TelegramPrincipal) (View, error) {
+	instances, err := u.store.ListInstances(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	sessions, err := u.allSessions(ctx, instances)
+	if err != nil {
+		return View{}, err
+	}
+	ready, attention, active := 0, 0, 0
+	for _, i := range instances {
+		if i.ObservedState == model.InstanceReady {
+			ready++
+		}
+	}
+	for _, s := range sessions {
+		if s.ObservedState != model.SessionClosed {
+			active++
+		}
+		if s.ObservedState == model.SessionNeedsAttention || s.ObservedState == model.SessionDegraded {
+			attention++
+		}
+	}
+	text := fmt.Sprintf("Antigravity Remote\n\nIDE ready: %d/%d\nActive sessions: %d\nNeeds attention: %d\nRole: %s", ready, len(instances), active, attention, p.Role)
+	return View{Text: text, Keyboard: keyboard([][]buttonSpec{{{"Projects", "u1|projects|0"}, {"Sessions", "u1|sessions|0"}}, {{"Instances", "u1|instances"}, {"Accounts", "u1|accounts"}}})}, nil
+}
+
+func (u *UI) projects(ctx context.Context, page int) (View, error) {
+	repos, err := u.store.ListRepositories(ctx, true)
+	if err != nil {
+		return View{}, err
+	}
+	sort.Slice(repos, func(i, j int) bool { return strings.ToLower(repos[i].Name) < strings.ToLower(repos[j].Name) })
+	start, end, page := pageBounds(len(repos), page)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Projects (%d)\n", len(repos))
+	rows := [][]buttonSpec{}
+	for _, r := range repos[start:end] {
+		fmt.Fprintf(&b, "\n• %s\n  %s", r.Name, r.CanonicalPath)
+		rows = append(rows, []buttonSpec{{r.Name, "u1|project|" + string(r.ID)}})
+	}
+	rows = append(rows, pager("projects", page, len(repos)))
+	rows = append(rows, []buttonSpec{{"Home", "u1|home"}})
+	return View{Text: b.String(), Keyboard: keyboard(rows)}, nil
+}
+
+func (u *UI) sessions(ctx context.Context, page int, p model.TelegramPrincipal) (View, error) {
+	instances, err := u.store.ListInstances(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	items, err := u.allSessions(ctx, instances)
+	if err != nil {
+		return View{}, err
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	start, end, page := pageBounds(len(items), page)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Sessions (%d)\n", len(items))
+	rows := [][]buttonSpec{}
+	for _, s := range items[start:end] {
+		repo, _ := u.store.GetRepository(ctx, s.RepositoryID)
+		label := repo.Name
+		if label == "" {
+			label = string(s.ID)
+		}
+		fmt.Fprintf(&b, "\n• %s — %s", label, s.ObservedState)
+		rows = append(rows, []buttonSpec{{label, "u1|session|" + string(s.ID)}})
+	}
+	rows = append(rows, pager("sessions", page, len(items)))
+	rows = append(rows, []buttonSpec{{"Home", "u1|home"}})
+	_ = p
+	return View{Text: b.String(), Keyboard: keyboard(rows)}, nil
+}
+
+func (u *UI) instances(ctx context.Context) (View, error) {
+	items, err := u.store.ListInstances(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "IDE instances (%d)\n", len(items))
+	for _, i := range items {
+		fmt.Fprintf(&b, "\n• %s [%s]\n  workspace: %s", fallback(i.Name, string(i.ID)), i.ObservedState, i.WorkingDir)
+	}
+	return View{Text: b.String(), Keyboard: keyboard([][]buttonSpec{{{"Home", "u1|home"}}})}, nil
+}
+
+func (u *UI) accountsView(ctx context.Context) (View, error) {
+	if u.accounts == nil {
+		return View{Text: "Accounts\n\nAccount source is not configured.", Keyboard: keyboard([][]buttonSpec{{{"Home", "u1|home"}}})}, nil
+	}
+	items, err := u.accounts.Accounts(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Accounts (%d)\n", len(items))
+	for _, a := range items {
+		status := "ready"
+		if a.Disabled {
+			status = "disabled"
+		}
+		fmt.Fprintf(&b, "\n• %s — %s", maskEmail(a.Email), status)
+	}
+	return View{Text: b.String(), Keyboard: keyboard([][]buttonSpec{{{"Home", "u1|home"}}})}, nil
+}
+
+func (u *UI) project(ctx context.Context, id model.RepositoryID, p model.TelegramPrincipal) (View, error) {
+	repo, err := u.store.GetRepository(ctx, id)
+	if err != nil {
+		return View{}, err
+	}
+	instances, err := u.store.ListInstances(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	all, err := u.allSessions(ctx, instances)
+	if err != nil {
+		return View{}, err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Project: %s\n\nPath: %s\nDefault branch: %s", repo.Name, repo.CanonicalPath, fallback(repo.DefaultBranch, "—"))
+	rows := [][]buttonSpec{}
+	for _, s := range all {
+		if s.RepositoryID == id && s.ObservedState != model.SessionClosed {
+			fmt.Fprintf(&b, "\n\nSession: %s", s.ObservedState)
+			rows = append(rows, []buttonSpec{{"Open session", "u1|session|" + string(s.ID)}})
+		}
+	}
+	if repo.Enabled && u.accounts != nil && roleRank(p.Role) >= roleRank(model.TelegramRoleOperator) {
+		rows = append(rows, []buttonSpec{{"New session", "u2|accounts|" + string(repo.ID) + "|0"}})
+	}
+	rows = append(rows, []buttonSpec{{"Projects", "u1|projects|0"}, {"Home", "u1|home"}})
+	return View{Text: b.String(), Keyboard: keyboard(rows)}, nil
+}
+
+func (u *UI) openAccounts(ctx context.Context, repositoryID model.RepositoryID, page int, p model.TelegramPrincipal) (View, error) {
+	if roleRank(p.Role) < roleRank(model.TelegramRoleOperator) {
+		return View{Text: "Opening sessions requires OPERATOR or OWNER role.", Keyboard: keyboard([][]buttonSpec{{{"Home", "u1|home"}}})}, nil
+	}
+	repo, err := u.store.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return View{}, err
+	}
+	if !repo.Enabled {
+		return View{Text: "Project is disabled and cannot be opened.", Keyboard: keyboard([][]buttonSpec{{{"Project", "u1|project|" + string(repo.ID)}}})}, nil
+	}
+	if u.accounts == nil {
+		return View{Text: "Cockpit account source is not configured.", Keyboard: keyboard([][]buttonSpec{{{"Project", "u1|project|" + string(repo.ID)}}})}, nil
+	}
+	accounts, err := u.accounts.Accounts(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	active := make([]cockpit.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if !account.Disabled && strings.TrimSpace(account.ID) != "" {
+			active = append(active, account)
+		}
+	}
+	sort.Slice(active, func(i, j int) bool {
+		li, lj := strings.ToLower(active[i].Email), strings.ToLower(active[j].Email)
+		if li == lj {
+			return active[i].ID < active[j].ID
+		}
+		return li < lj
+	})
+	start, end, page := pageBounds(len(active), page)
+	var b strings.Builder
+	fmt.Fprintf(&b, "Open %s\n\nChoose Cockpit account (%d):", repo.Name, len(active))
+	rows := [][]buttonSpec{}
+	for _, account := range active[start:end] {
+		label := maskEmail(account.Email)
+		if label == "unknown" {
+			label = fallback(account.Name, "account")
+		}
+		if account.Plan != "" {
+			label += " · " + account.Plan
+		}
+		rows = append(rows, []buttonSpec{{label, "u2|open|" + string(repo.ID) + "|" + accountRef(account.ID)}})
+	}
+	rows = append(rows, accountPager(repo.ID, page, len(active)))
+	rows = append(rows, []buttonSpec{{"Project", "u1|project|" + string(repo.ID)}, {"Home", "u1|home"}})
+	return View{Text: b.String(), Keyboard: keyboard(rows)}, nil
+}
+
+func (u *UI) queueOpen(ctx context.Context, repositoryID model.RepositoryID, ref string, query CallbackQuery, p model.TelegramPrincipal) (View, error) {
+	if roleRank(p.Role) < roleRank(model.TelegramRoleOperator) {
+		return View{Text: "Opening sessions requires OPERATOR or OWNER role.", Keyboard: keyboard([][]buttonSpec{{{"Home", "u1|home"}}})}, nil
+	}
+	repo, err := u.store.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return View{}, err
+	}
+	if !repo.Enabled {
+		return View{Text: "Project is disabled and cannot be opened.", Keyboard: keyboard([][]buttonSpec{{{"Projects", "u1|projects|0"}}})}, nil
+	}
+	account, ok, err := u.resolveAccountRef(ctx, ref)
+	if err != nil {
+		return View{}, err
+	}
+	if !ok {
+		return View{Text: "Account list changed or selection is ambiguous. Refresh the account list.", Keyboard: keyboard([][]buttonSpec{{{"Refresh accounts", "u2|accounts|" + string(repo.ID) + "|0"}}})}, nil
+	}
+	if query.Message == nil {
+		return View{}, fmt.Errorf("Telegram callback message is required")
+	}
+	generator := model.NewIDGenerator()
+	id, err := generator.New(model.IDRemoteSessionRequest)
+	if err != nil {
+		return View{}, err
+	}
+	now := time.Now().UTC()
+	request := model.RemoteSessionRequest{
+		ID:                   model.RemoteSessionRequestID(id),
+		Source:               "telegram",
+		SourceMessageID:      "callback:" + query.ID,
+		RepositoryID:         repo.ID,
+		AccountID:            account.ID,
+		ChatID:               query.Message.Chat.ID,
+		ThreadID:             query.Message.MessageThreadID,
+		RequesterUserID:      p.UserID,
+		InstanceStrategy:     "AUTO",
+		ConversationStrategy: "NEW",
+		IsolationMode:        model.IsolationExclusiveWrite,
+		State:                model.SessionRequestPending,
+		RequestedAt:          now,
+	}
+	admitted, created, err := u.store.AdmitSessionRequest(ctx, request)
+	if err != nil {
+		return View{}, err
+	}
+	verb := "Queued"
+	if !created {
+		verb = "Already queued"
+	}
+	text := fmt.Sprintf("%s Antigravity session\n\nProject: %s\nAccount: %s\nState: %s\nRequest: %s", verb, repo.Name, maskEmail(account.Email), admitted.State, admitted.ID)
+	return View{Text: text, Keyboard: keyboard([][]buttonSpec{{{"Sessions", "u1|sessions|0"}, {"Home", "u1|home"}}})}, nil
+}
+
+func (u *UI) resolveAccountRef(ctx context.Context, ref string) (cockpit.Account, bool, error) {
+	if u.accounts == nil || len(ref) != 16 {
+		return cockpit.Account{}, false, nil
+	}
+	items, err := u.accounts.Accounts(ctx)
+	if err != nil {
+		return cockpit.Account{}, false, err
+	}
+	var match cockpit.Account
+	matches := 0
+	for _, account := range items {
+		if account.Disabled || strings.TrimSpace(account.ID) == "" || accountRef(account.ID) != ref {
+			continue
+		}
+		match = account
+		matches++
+	}
+	return match, matches == 1, nil
+}
+
+func accountRef(accountID string) string {
+	sum := sha256.Sum256([]byte(accountID))
+	return hex.EncodeToString(sum[:8])
+}
+
+func accountPager(repositoryID model.RepositoryID, page, total int) []buttonSpec {
+	pages := (total + uiPageSize - 1) / uiPageSize
+	if pages <= 1 {
+		return nil
+	}
+	var out []buttonSpec
+	if page > 0 {
+		out = append(out, buttonSpec{"‹ Prev", fmt.Sprintf("u2|accounts|%s|%d", repositoryID, page-1)})
+	}
+	if page+1 < pages {
+		out = append(out, buttonSpec{"Next ›", fmt.Sprintf("u2|accounts|%s|%d", repositoryID, page+1)})
+	}
+	return out
+}
+
+func (u *UI) session(ctx context.Context, id model.RemoteSessionID, p model.TelegramPrincipal) (View, error) {
+	s, err := u.store.GetSession(ctx, id)
+	if err != nil {
+		return View{}, err
+	}
+	repo, err := u.store.GetRepository(ctx, s.RepositoryID)
+	if err != nil {
+		return View{}, err
+	}
+	conv, err := u.store.GetConversation(ctx, s.ConversationID)
+	if err != nil {
+		return View{}, err
+	}
+	inst, err := u.store.GetInstance(ctx, s.CockpitInstanceID)
+	if err != nil {
+		return View{}, err
+	}
+	text := fmt.Sprintf("Session\n\nProject: %s\nState: %s\nIDE: %s\nConversation: %s\nIsolation: %s\nWorkspace: %s", repo.Name, s.ObservedState, inst.ObservedState, fallback(conv.Title, conv.ProviderConversationID), s.IsolationMode, s.WorkspacePath)
+	rows := [][]buttonSpec{}
+	if roleRank(p.Role) >= roleRank(model.TelegramRoleOperator) {
+		rows = append(rows, []buttonSpec{{"Pause", "r1|pause|" + string(s.ID)}, {"Resume", "r1|resume|" + string(s.ID)}}, []buttonSpec{{"Cancel agent", "r1|cancel|" + string(s.ID)}})
+	}
+	if p.Role == model.TelegramRoleOwner {
+		rows = append(rows, []buttonSpec{{"Close session", "r1|close|" + string(s.ID)}})
+	}
+	rows = append(rows, []buttonSpec{{"Sessions", "u1|sessions|0"}, {"Home", "u1|home"}})
+	return View{Text: text, Keyboard: keyboard(rows)}, nil
+}
+
+func (u *UI) allSessions(ctx context.Context, instances []model.InstanceMirror) ([]model.RemoteSession, error) {
+	var out []model.RemoteSession
+	for _, i := range instances {
+		items, err := u.store.ListSessionsByInstance(ctx, i.ID, false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, items...)
+	}
+	return out, nil
+}
+
+type buttonSpec struct{ text, data string }
+
+func keyboard(rows [][]buttonSpec) InlineKeyboardMarkup {
+	out := InlineKeyboardMarkup{}
+	for _, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		buttons := make([]InlineKeyboardButton, 0, len(row))
+		for _, b := range row {
+			if b.text == "" || b.data == "" || len([]byte(b.data)) > 64 {
+				continue
+			}
+			buttons = append(buttons, InlineKeyboardButton{Text: b.text, CallbackData: b.data})
+		}
+		if len(buttons) > 0 {
+			out.InlineKeyboard = append(out.InlineKeyboard, buttons)
+		}
+	}
+	return out
+}
+
+func pager(section string, page, total int) []buttonSpec {
+	pages := (total + uiPageSize - 1) / uiPageSize
+	if pages <= 1 {
+		return nil
+	}
+	var out []buttonSpec
+	if page > 0 {
+		out = append(out, buttonSpec{"‹ Prev", fmt.Sprintf("u1|%s|%d", section, page-1)})
+	}
+	if page+1 < pages {
+		out = append(out, buttonSpec{"Next ›", fmt.Sprintf("u1|%s|%d", section, page+1)})
+	}
+	return out
+}
+
+func pageBounds(total, page int) (int, int, int) {
+	pages := (total + uiPageSize - 1) / uiPageSize
+	if pages < 1 {
+		pages = 1
+	}
+	if page < 0 {
+		page = 0
+	}
+	if page >= pages {
+		page = pages - 1
+	}
+	start := page * uiPageSize
+	end := start + uiPageSize
+	if end > total {
+		end = total
+	}
+	return start, end, page
+}
+
+func parsePage(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func fallback(v, alt string) string {
+	if strings.TrimSpace(v) == "" {
+		return alt
+	}
+	return v
+}
+
+func maskEmail(email string) string {
+	email = strings.TrimSpace(email)
+	at := strings.IndexByte(email, '@')
+	if at <= 0 {
+		return fallback(email, "unknown")
+	}
+	local, domain := email[:at], email[at+1:]
+	if len(local) > 2 {
+		local = local[:2] + "***"
+	}
+	return local + "@" + domain
+}
