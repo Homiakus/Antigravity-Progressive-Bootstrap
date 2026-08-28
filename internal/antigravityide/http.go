@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -127,6 +128,23 @@ func (c *HTTPClient) SendMessage(ctx context.Context, id, text string) error {
 	return c.request(ctx, http.MethodPost, "/v1/conversations/"+url.PathEscape(id)+"/messages", map[string]string{"text": text}, nil)
 }
 
+func (c *HTTPClient) Events(ctx context.Context, id string, after uint64) ([]BridgeEvent, error) {
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("conversation id is required")
+	}
+	var out []BridgeEvent
+	endpoint := "/v1/conversations/" + url.PathEscape(id) + "/events?after=" + strconv.FormatUint(after, 10)
+	if err := c.request(ctx, http.MethodGet, endpoint, nil, &out); err != nil {
+		return nil, err
+	}
+	for i, event := range out {
+		if event.Seq == 0 || strings.TrimSpace(event.Type) == "" || strings.TrimSpace(event.SourceEventID) == "" || strings.TrimSpace(event.StreamKey) == "" || event.Timestamp.IsZero() || len(event.Payload) == 0 {
+			return nil, fmt.Errorf("bridge returned invalid event at index %d", i)
+		}
+	}
+	return out, nil
+}
+
 func (c *HTTPClient) OpenWorkspace(ctx context.Context, workspacePath string) (OpenWorkspaceResult, error) {
 	if strings.TrimSpace(workspacePath) == "" {
 		return OpenWorkspaceResult{}, fmt.Errorf("workspace path is required")
@@ -139,8 +157,16 @@ func (c *HTTPClient) OpenWorkspace(ctx context.Context, workspacePath string) (O
 }
 
 func (c *HTTPClient) request(ctx context.Context, method, endpoint string, body any, out any) error {
+	ref, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("parse bridge endpoint: %w", err)
+	}
+	if ref.IsAbs() || ref.Host != "" {
+		return fmt.Errorf("bridge endpoint must be relative")
+	}
 	u := *c.base
-	u.Path = path.Join(c.base.Path, endpoint)
+	u.Path = path.Join(c.base.Path, ref.Path)
+	u.RawQuery = ref.RawQuery
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
@@ -160,7 +186,7 @@ func (c *HTTPClient) request(ctx context.Context, method, endpoint string, body 
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("Antigravity Bridge %s %s: %w", method, endpoint, err)
+		return fmt.Errorf("Antigravity Bridge %s %s: %w", method, ref.Path, err)
 	}
 	defer resp.Body.Close()
 	limited := io.LimitReader(resp.Body, 4<<20)
