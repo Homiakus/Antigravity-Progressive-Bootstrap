@@ -9,14 +9,15 @@ import (
 
 	"github.com/homiakus/agctl/internal/cockpit"
 	"github.com/homiakus/agctl/internal/remote/model"
+	runtimectl "github.com/homiakus/agctl/internal/remote/runtime"
 	remotestore "github.com/homiakus/agctl/internal/remote/store"
 )
 
 var (
-	ErrAccountNotFound = errors.New("remote account: account not found")
-	ErrAccountDisabled = errors.New("remote account: account disabled")
+	ErrAccountNotFound  = errors.New("remote account: account not found")
+	ErrAccountDisabled  = errors.New("remote account: account disabled")
 	ErrInstanceNotFound = errors.New("remote account: instance not found")
-	ErrActiveSessions = errors.New("remote account: active sessions require handoff")
+	ErrActiveSessions   = errors.New("remote account: active sessions require handoff")
 	ErrObservedMismatch = errors.New("remote account: persisted and Cockpit account mismatch")
 )
 
@@ -31,29 +32,30 @@ type CockpitClient interface {
 }
 
 type Impact struct {
-	SessionID      model.RemoteSessionID `json:"sessionId"`
-	RepositoryID   model.RepositoryID    `json:"repositoryId"`
-	ConversationID model.ConversationID  `json:"conversationId"`
-	WorkspacePath  string                `json:"workspacePath"`
+	SessionID      model.RemoteSessionID    `json:"sessionId"`
+	RepositoryID   model.RepositoryID       `json:"repositoryId"`
+	ConversationID model.ConversationID     `json:"conversationId"`
+	WorkspacePath  string                   `json:"workspacePath"`
 	ObservedState  model.SessionObservedState `json:"observedState"`
 }
 
 type SwitchPlan struct {
 	InstanceID              model.InstanceID `json:"instanceId"`
-	CurrentAccountID        string           `json:"currentAccountId,omitempty"`
-	TargetAccount           cockpit.Account  `json:"targetAccount"`
-	Running                  bool             `json:"running"`
-	NoOp                     bool             `json:"noOp"`
-	RequiresColdRestart      bool             `json:"requiresColdRestart"`
-	RequiresCheckpoint       bool             `json:"requiresCheckpoint"`
-	RequiresHandoff          bool             `json:"requiresHandoff"`
-	PersistedAccountMismatch bool             `json:"persistedAccountMismatch"`
-	Impacts                  []Impact         `json:"impacts"`
+	CurrentAccountID        string            `json:"currentAccountId,omitempty"`
+	TargetAccount           cockpit.Account   `json:"targetAccount"`
+	Running                  bool              `json:"running"`
+	NoOp                     bool              `json:"noOp"`
+	RequiresColdRestart      bool              `json:"requiresColdRestart"`
+	RequiresCheckpoint       bool              `json:"requiresCheckpoint"`
+	RequiresHandoff          bool              `json:"requiresHandoff"`
+	PersistedAccountMismatch bool              `json:"persistedAccountMismatch"`
+	Impacts                  []Impact          `json:"impacts"`
 }
 
 type Service struct {
 	store   Store
 	cockpit CockpitClient
+	runtime runtimectl.Manager
 }
 
 func New(store Store, cockpitClient CockpitClient) (*Service, error) {
