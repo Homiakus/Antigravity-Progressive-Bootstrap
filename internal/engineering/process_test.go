@@ -14,6 +14,9 @@ func writePlan(t *testing.T, root, taskStatus string) {
 ### F-027 — Process completion was not machine enforced
 **Status:** Resolved. **Severity:** High.
 
+### F-028 — Completion inferred repository from ambient cwd
+**Status:** Resolved. **Severity:** High.
+
 ### T-027 — Enforce living engineering process
 **Status:** ` + taskStatus + `. **Priority:** P0.
 `
@@ -35,10 +38,10 @@ func completeEvidence() []string {
 		"security:trust boundaries and fail-closed defaults reviewed",
 		"compatibility:no public API break",
 		"performance:n/a: no hot-path behavior changed",
-		"findings:F-027",
+		"findings:F-027 F-028",
 		"self-review:root cause fixed without duplicate source of truth",
-		"plan-reconcile:MASTER_PLAN updated with task, finding and iteration result",
-		"process-review:missing completion categories are now executable guards",
+		"plan-reconcile:MASTER_PLAN updated with task, findings and iteration result",
+		"process-review:missing completion categories and ambient cwd coupling are now executable guards",
 		"push-main:remote main head verified after normal push",
 		"checkpoint:continuation state recorded in MASTER_PLAN",
 	}
@@ -52,6 +55,50 @@ func TestValidateCompletionUnmanagedRepositoryPreservesLegacyBehavior(t *testing
 	}
 	if got.Managed {
 		t.Fatal("repository without MASTER_PLAN.md must not be treated as managed")
+	}
+}
+
+func TestExplicitUnmanagedWorkspaceDoesNotInheritFallbackPlan(t *testing.T) {
+	managedFallback := t.TempDir()
+	writePlan(t, managedFallback, "DONE")
+	unmanagedWorkspace := t.TempDir()
+	got, err := ValidateCompletionForWorkspaces([]string{unmanagedWorkspace}, managedFallback, []string{"synthetic verification"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Managed {
+		t.Fatalf("explicit unmanaged workspace inherited ambient plan %q", got.PlanPath)
+	}
+}
+
+func TestMultipleIndependentLivingPlansFailClosed(t *testing.T) {
+	left := t.TempDir()
+	right := t.TempDir()
+	writePlan(t, left, "DONE")
+	writePlan(t, right, "DONE")
+	_, err := ValidateCompletionForWorkspaces([]string{left, right}, "", completeEvidence())
+	if err == nil || !strings.Contains(err.Error(), "multiple MASTER_PLAN.md") {
+		t.Fatalf("expected multi-plan fail-closed error, got %v", err)
+	}
+}
+
+func TestMultipleWorkspacesUnderSamePlanAreAllowed(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "DONE")
+	left := filepath.Join(root, "left")
+	right := filepath.Join(root, "right")
+	if err := os.MkdirAll(left, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(right, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ValidateCompletionForWorkspaces([]string{left, right}, "", completeEvidence())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Managed || got.PlanPath != filepath.Join(root, PlanFileName) {
+		t.Fatalf("unexpected shared-plan resolution: %+v", got)
 	}
 }
 
@@ -71,7 +118,7 @@ func TestValidateCompletionRequiresDeclaredDoneTaskAndBindsPlanDigest(t *testing
 	if last := got.Verification[len(got.Verification)-1]; !strings.HasPrefix(last, "plan-digest:") {
 		t.Fatalf("completion evidence is not digest-bound: %q", last)
 	}
-	if len(got.FindingIDs) != 1 || got.FindingIDs[0] != "F-027" {
+	if len(got.FindingIDs) != 2 || got.FindingIDs[0] != "F-027" || got.FindingIDs[1] != "F-028" {
 		t.Fatalf("unexpected finding linkage: %v", got.FindingIDs)
 	}
 }
@@ -97,6 +144,24 @@ func TestValidateCompletionRejectsUndeclaredFinding(t *testing.T) {
 	_, err := ValidateCompletion(root, evidence)
 	if err == nil || !strings.Contains(err.Error(), "not declared") {
 		t.Fatalf("expected undeclared finding error, got %v", err)
+	}
+}
+
+func TestValidateCompletionAllowsReasonedNoFindings(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "DONE")
+	evidence := completeEvidence()
+	for i := range evidence {
+		if strings.HasPrefix(evidence[i], "findings:") {
+			evidence[i] = "findings:none: no unexpected substantial finding"
+		}
+	}
+	got, err := ValidateCompletion(root, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.FindingIDs) != 0 {
+		t.Fatalf("reasoned no-findings evidence produced IDs: %v", got.FindingIDs)
 	}
 }
 
