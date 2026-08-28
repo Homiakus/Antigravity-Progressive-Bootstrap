@@ -32,18 +32,17 @@ func TestProviderDemandStoreRoundTripIdempotencyAndHistoryFilters(t *testing.T) 
 	db := openTestStore(t)
 	now := time.Unix(62000, 0).UTC()
 	seedProviderRuntimeParents(t, db, now)
-	assignment := harnessmodel.ProviderAssignment{
-		ID: "pasn_demand", AttemptID: testProviderAttemptID, AccountID: testProviderAccountID, ModelID: "model-a",
-		State: harnessmodel.ProviderAssignmentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CreateProviderAssignment(ctx, assignment) }); err != nil {
-		t.Fatal(err)
-	}
 
-	insert := func(key string, metric harnessmodel.QuotaMetricKind, amount float64, observed time.Time, task, repo, contextClass string) {
+	type inserted struct {
+		assignment  harnessmodel.ProviderAssignment
+		reservation harnessmodel.ProviderReservation
+	}
+	fixtures := map[string]inserted{}
+	insert := func(suffix, key string, metric harnessmodel.QuotaMetricKind, amount float64, observed time.Time, task, repo, contextClass string) {
 		t.Helper()
+		assignment, reservation := createSettledDemandReservation(t, db, observed.Add(-time.Second), suffix, metric)
 		usage := harnessmodel.ProviderUsageSample{
-			Key: key, AssignmentID: assignment.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
+			Key: key, AssignmentID: assignment.ID, ReservationID: reservation.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
 			Metric: metric, Amount: amount, ObservedAt: observed, CreatedAt: observed.Add(time.Second),
 		}
 		dims := harnessmodel.ProviderDemandDimensions{UsageKey: key, TaskClass: task, RepositoryClass: repo, ContextClass: contextClass}
@@ -60,12 +59,13 @@ func TestProviderDemandStoreRoundTripIdempotencyAndHistoryFilters(t *testing.T) 
 		}); err != nil {
 			t.Fatal(err)
 		}
+		fixtures[key] = inserted{assignment: assignment, reservation: reservation}
 	}
 
-	insert("usage-1", harnessmodel.QuotaMetricTokens, 10, now.Add(time.Minute), "code", "medium", "warm")
-	insert("usage-2", harnessmodel.QuotaMetricTokens, 20, now.Add(2*time.Minute), "code", "medium", "cold")
-	insert("usage-3", harnessmodel.QuotaMetricTokens, 30, now.Add(3*time.Minute), "review", "medium", "warm")
-	insert("usage-4", harnessmodel.QuotaMetricRequests, 99, now.Add(4*time.Minute), "code", "medium", "warm")
+	insert("one", "usage-1", harnessmodel.QuotaMetricTokens, 10, now.Add(time.Minute), "code", "medium", "warm")
+	insert("two", "usage-2", harnessmodel.QuotaMetricTokens, 20, now.Add(2*time.Minute), "code", "medium", "cold")
+	insert("three", "usage-3", harnessmodel.QuotaMetricTokens, 30, now.Add(3*time.Minute), "review", "medium", "warm")
+	insert("four", "usage-4", harnessmodel.QuotaMetricRequests, 99, now.Add(4*time.Minute), "code", "medium", "warm")
 
 	if err := db.Update(ctx, func(tx harnessstore.Tx) error {
 		dtx, err := demandTx(tx)
@@ -93,6 +93,30 @@ func TestProviderDemandStoreRoundTripIdempotencyAndHistoryFilters(t *testing.T) 
 		return err
 	}); !errors.Is(err, harnessstore.ErrConflict) {
 		t.Fatalf("conflicting dimensions replay error=%v want ErrConflict", err)
+	}
+
+	// A second provider event for the same assignment/metric is raw telemetry,
+	// not another independent task-demand sample.
+	first := fixtures["usage-1"]
+	secondUsage := harnessmodel.ProviderUsageSample{
+		Key: "usage-1-second-event", AssignmentID: first.assignment.ID, ReservationID: first.reservation.ID,
+		AccountID: first.assignment.AccountID, ModelID: first.assignment.ModelID, Metric: harnessmodel.QuotaMetricTokens,
+		Amount: 11, ObservedAt: now.Add(90 * time.Second), CreatedAt: now.Add(90 * time.Second),
+	}
+	if err := db.Update(ctx, func(tx harnessstore.Tx) error {
+		if _, _, err := tx.PutProviderUsageSample(ctx, secondUsage); err != nil {
+			return err
+		}
+		dtx, err := demandTx(tx)
+		if err != nil {
+			return err
+		}
+		_, _, err = dtx.PutProviderDemandDimensions(ctx, harnessmodel.ProviderDemandDimensions{
+			UsageKey: secondUsage.Key, TaskClass: "code", RepositoryClass: "medium", ContextClass: "warm",
+		})
+		return err
+	}); !errors.Is(err, harnessstore.ErrConflict) {
+		t.Fatalf("second canonical sample error=%v want ErrConflict", err)
 	}
 
 	if err := db.View(ctx, func(r harnessstore.Reader) error {
@@ -148,16 +172,10 @@ func TestProviderDemandDimensionsRequireAuthoritativeUsageModel(t *testing.T) {
 	db := openTestStore(t)
 	now := time.Unix(63000, 0).UTC()
 	seedProviderRuntimeParents(t, db, now)
-	assignment := harnessmodel.ProviderAssignment{
-		ID: "pasn_demand_model", AttemptID: testProviderAttemptID, AccountID: testProviderAccountID, ModelID: "model-a",
-		State: harnessmodel.ProviderAssignmentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	assignment, reservation := createSettledDemandReservation(t, db, now, "missing-model", harnessmodel.QuotaMetricTokens)
 	if err := db.Update(ctx, func(tx harnessstore.Tx) error {
-		if err := tx.CreateProviderAssignment(ctx, assignment); err != nil {
-			return err
-		}
 		_, _, err := tx.PutProviderUsageSample(ctx, harnessmodel.ProviderUsageSample{
-			Key: "usage-no-model", AssignmentID: assignment.ID, AccountID: assignment.AccountID,
+			Key: "usage-no-model", AssignmentID: assignment.ID, ReservationID: reservation.ID, AccountID: assignment.AccountID,
 			Metric: harnessmodel.QuotaMetricTokens, Amount: 1, ObservedAt: now, CreatedAt: now,
 		})
 		return err
