@@ -260,11 +260,94 @@ type TaskRecord struct {
 	Tags               []string        `json:"tags,omitempty"`
 }
 
+type TaskSupervisorConfig struct {
+	MaxParallel    int `json:"maxParallel"`
+	CPUWeight      int `json:"cpuWeight"`
+	BuildSlots     int `json:"buildSlots"`
+	BrowserSlots   int `json:"browserSlots"`
+	MaxTaskMinutes int `json:"maxTaskMinutes"`
+	MaxRetries     int `json:"maxRetries"`
+}
+
+// SecurityFinding is a normalized supply-chain/runtime security observation.
+type SecurityFinding struct {
+	Severity string `json:"severity"`
+	Area     string `json:"area"`
+	ID       string `json:"id"`
+	Message  string `json:"message"`
+	Penalty  int    `json:"penalty,omitempty"`
+}
+
+type SecurityReport struct {
+	GeneratedAt string            `json:"generatedAt"`
+	Workspace   string            `json:"workspace,omitempty"`
+	Score       int               `json:"score"`
+	Grade       string            `json:"grade"`
+	Findings    []SecurityFinding `json:"findings,omitempty"`
+}
+
+// PlanRevision records an adaptive mutation of an execution DAG.
 type PlanRevision struct {
-	Revision   int      `json:"revision"`
-	Reason     string   `json:"reason"`
-	ProposalID string   `json:"proposalId,omitempty"`
-	CreatedAt  string   `json:"createdAt"`
-	NodesAdded []string `json:"nodesAdded,omitempty"`
-	Rewired    []string `json:"rewired,omitempty"`
+	Number           int      `json:"number"`
+	CreatedAt        string   `json:"createdAt"`
+	TriggerTaskID    string   `json:"triggerTaskId,omitempty"`
+	TriggerNodeID    string   `json:"triggerNodeId,omitempty"`
+	Reason           string   `json:"reason"`
+	Kind             string   `json:"kind"` // proposal|failure-recovery|manual
+	AddedNodes       []string `json:"addedNodes,omitempty"`
+	RewiredNodes     []string `json:"rewiredNodes,omitempty"`
+	FailureSignature string   `json:"failureSignature,omitempty"`
+	Fingerprints     []string `json:"fingerprints,omitempty"`
+}
+
+// ReplanConfig bounds autonomous graph growth and no-progress behavior.
+type ReplanConfig struct {
+	Enabled          bool    `json:"enabled"`
+	MaxRevisions     int     `json:"maxRevisions"`
+	MaxDynamicNodes  int     `json:"maxDynamicNodes"`
+	MaxRepairDepth   int     `json:"maxRepairDepth"`
+	MaxSameFailure   int     `json:"maxSameFailure"`
+	MinConfidence    float64 `json:"minConfidence"`
+	AutoApplyRiskMax string  `json:"autoApplyRiskMax"`
+	PreferWorktrees  bool    `json:"preferWorktrees"`
+	RequireEvidence  bool    `json:"requireEvidence"`
+}
+
+// ReplanProposal is the machine-readable contract an executing agent can emit
+// when it discovers material work not represented in the current DAG.
+type ReplanProposal struct {
+	Version      int            `json:"version"`
+	PlanID       string         `json:"planId"`
+	ParentNodeID string         `json:"parentNodeId"`
+	ParentTaskID string         `json:"parentTaskId"`
+	Reason       string         `json:"reason"`
+	Evidence     []string       `json:"evidence,omitempty"`
+	Confidence   float64        `json:"confidence"`
+	Actions      []ReplanAction `json:"actions"`
+	CreatedAt    string         `json:"createdAt,omitempty"`
+}
+
+type ReplanAction struct {
+	ID             string          `json:"id"`
+	Title          string          `json:"title"`
+	Objective      string          `json:"objective"`
+	Agent          string          `json:"agent,omitempty"`
+	DependsOn      []string        `json:"dependsOn,omitempty"`
+	Verification   []string        `json:"verification,omitempty"`
+	Tags           []string        `json:"tags,omitempty"`
+	Resources      ResourceRequest `json:"resources,omitempty"`
+	Risk           string          `json:"risk,omitempty"`
+	Parallelizable bool            `json:"parallelizable,omitempty"`
+}
+
+type ReplanResult struct {
+	Applied      bool     `json:"applied"`
+	PlanID       string   `json:"planId,omitempty"`
+	Revision     int      `json:"revision,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	AddedNodes   []string `json:"addedNodes,omitempty"`
+	CreatedTasks []string `json:"createdTasks,omitempty"`
+	RewiredTasks []string `json:"rewiredTasks,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+	NoProgress   bool     `json:"noProgress,omitempty"`
 }
