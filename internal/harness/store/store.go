@@ -73,6 +73,11 @@ type Reader interface {
 	ListWorkspacesByOwner(context.Context, harnessmodel.WorkflowRunID) ([]harnessmodel.WorkspaceRecord, error)
 	ListWorkspacesByRepo(context.Context, string) ([]harnessmodel.WorkspaceRecord, error)
 	ListActiveWorkspaces(context.Context) ([]harnessmodel.WorkspaceRecord, error)
+	GetProviderAccount(context.Context, harnessmodel.ProviderAccountID) (harnessmodel.ProviderAccount, error)
+	ListProviderAccounts(context.Context, harnessmodel.ProviderKind, harnessmodel.ProviderAccountState) ([]harnessmodel.ProviderAccount, error)
+	ListProviderModels(context.Context, harnessmodel.ProviderAccountID) ([]harnessmodel.ProviderModelDescriptor, error)
+	GetLatestProviderCapacity(context.Context, harnessmodel.ProviderAccountID) (harnessmodel.ProviderCapacitySnapshot, error)
+	ListProviderSessions(context.Context, harnessmodel.ProviderAccountID) ([]harnessmodel.ProviderSessionSnapshot, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -127,6 +132,10 @@ type Tx interface {
 	CreateWorkspace(context.Context, harnessmodel.WorkspaceRecord) error
 	UpdateWorkspaceState(context.Context, harnessmodel.WorkspaceID, harnessmodel.WorkspaceState, time.Time) error
 	DeleteWorkspace(context.Context, harnessmodel.WorkspaceID) error
+	UpsertProviderAccount(context.Context, harnessmodel.ProviderAccount) error
+	UpsertProviderModel(context.Context, harnessmodel.ProviderModelDescriptor, time.Time) error
+	AppendProviderCapacity(context.Context, harnessmodel.ProviderCapacitySnapshot) error
+	UpsertProviderSession(context.Context, harnessmodel.ProviderSessionSnapshot, time.Time) error
 	AddWorkflowNode(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeSpec) error
 	AddWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
 	RemoveWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
