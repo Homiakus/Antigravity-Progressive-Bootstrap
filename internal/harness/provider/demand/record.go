@@ -13,9 +13,11 @@ type RecordResult struct {
 	DimensionsCreated bool `json:"dimensionsCreated"`
 }
 
-// Recorder atomically records one immutable provider usage event and the
-// categorical dimensions required for later estimation. Replays are safe at
-// both layers; a semantic conflict rolls back the transaction.
+// Recorder atomically records one canonical settled provider usage sample and
+// its estimator dimensions. The usage must already reference a SETTLED provider
+// reservation and carry authoritative model attribution; intermediate/raw usage
+// updates remain outside estimator training history. Replays are safe at both
+// layers, and any semantic conflict rolls back the transaction.
 type Recorder struct {
 	Store harnessstore.Store
 }
