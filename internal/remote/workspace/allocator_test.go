@@ -12,15 +12,15 @@ import (
 )
 
 type fakeManager struct {
-	allocParams  []harnessworkspace.AllocateParams
-	createdRepo  string
+	allocParams   []harnessworkspace.AllocateParams
+	createdRepo   string
 	createdBranch string
-	createdPath  string
-	createdBase  string
-	createErr    error
-	removedRepo  string
-	removedPath  string
-	released     []harnessmodel.WorkspaceID
+	createdPath   string
+	createdBase   string
+	createErr     error
+	removedRepo   string
+	removedPath   string
+	released      []harnessmodel.WorkspaceID
 }
 
 func (f *fakeManager) Allocate(_ context.Context, params harnessworkspace.AllocateParams) (harnessmodel.WorkspaceRecord, error) {
@@ -62,6 +62,7 @@ func TestWorktreeAllocationUsesDeterministicBranchAndPath(t *testing.T) {
 	root := filepath.Join("tmp", "remote-worktrees")
 	allocator, err := NewHarnessAllocator(manager, root)
 	if err != nil { t.Fatal(err) }
+	allocator.git = fakeGitInspector{status: GitStatus{Dirty: false, Head: "abc"}}
 	sid := model.RemoteSessionID("rsi_1700000000000_00000000000000000001")
 	wid := model.WorkspaceID("rws_1700000000000_00000000000000000001")
 	allocation, err := allocator.Allocate(context.Background(), Request{WorkspaceID: wid, SessionID: sid, Repository: testRepo(), Mode: model.IsolationWorktree})
@@ -70,12 +71,13 @@ func TestWorktreeAllocationUsesDeterministicBranchAndPath(t *testing.T) {
 	if allocation.Branch != wantBranch || manager.createdBranch != wantBranch { t.Fatalf("branch=%q created=%q", allocation.Branch, manager.createdBranch) }
 	wantPath := filepath.Join(root, string(sid), "my-repo")
 	if allocation.Path != wantPath || manager.createdPath != wantPath { t.Fatalf("path=%q created=%q", allocation.Path, manager.createdPath) }
-	if manager.createdBase != "main" { t.Fatalf("base=%q", manager.createdBase) }
+	if manager.createdBase != "main" || allocation.BaseRef != "main" { t.Fatalf("base created=%q allocation=%q", manager.createdBase, allocation.BaseRef) }
 }
 
 func TestWorktreeCreationFailureReleasesHarnessLease(t *testing.T) {
 	manager := &fakeManager{createErr: errors.New("git failed")}
 	allocator, _ := NewHarnessAllocator(manager, "/worktrees")
+	allocator.git = fakeGitInspector{status: GitStatus{Dirty: false, Head: "abc"}}
 	wid := model.WorkspaceID("rws_1700000000000_00000000000000000001")
 	_, err := allocator.Allocate(context.Background(), Request{WorkspaceID: wid, SessionID: model.RemoteSessionID("rsi_1700000000000_00000000000000000001"), Repository: testRepo(), Mode: model.IsolationWorktree})
 	if err == nil { t.Fatal("expected worktree failure") }

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -13,13 +14,16 @@ import (
 	"github.com/homiakus/agctl/internal/remote/model"
 )
 
+var ErrDirtyRepository = errors.New("remote workspace: repository has uncommitted changes")
+
 type Request struct {
-	WorkspaceID model.WorkspaceID
-	SessionID   model.RemoteSessionID
-	Repository  model.Repository
-	Mode        model.IsolationMode
-	BaseRef     string
-	TTL         time.Duration
+	WorkspaceID    model.WorkspaceID
+	SessionID      model.RemoteSessionID
+	Repository     model.Repository
+	Mode           model.IsolationMode
+	BaseRef        string
+	TTL            time.Duration
+	AllowDirtyBase bool
 }
 
 type Allocation struct {
@@ -27,13 +31,33 @@ type Allocation struct {
 	HarnessID harnessmodel.WorkspaceID
 	Path      string
 	Branch    string
+	BaseRef   string
 	Mode      model.IsolationMode
 	RepoRoot  string
+}
+
+type Handoff struct {
+	WorkspaceID  model.WorkspaceID `json:"workspaceId"`
+	RepoRoot     string            `json:"repoRoot"`
+	WorktreePath string            `json:"worktreePath"`
+	SourceBranch string            `json:"sourceBranch"`
+	BaseRef      string            `json:"baseRef"`
+	TargetBranch string            `json:"targetBranch"`
+	Strategy     string            `json:"strategy"`
 }
 
 type Allocator interface {
 	Allocate(context.Context, Request) (Allocation, error)
 	Release(context.Context, Allocation) error
+}
+
+type GitStatus struct {
+	Dirty bool
+	Head  string
+}
+
+type GitInspector interface {
+	Status(context.Context, string) (GitStatus, error)
 }
 
 type HarnessManager interface {
@@ -46,6 +70,7 @@ type HarnessManager interface {
 type HarnessAllocator struct {
 	manager      HarnessManager
 	worktreeRoot string
+	git          GitInspector
 }
 
 func NewHarnessAllocator(manager HarnessManager, worktreeRoot string) (*HarnessAllocator, error) {
@@ -55,7 +80,7 @@ func NewHarnessAllocator(manager HarnessManager, worktreeRoot string) (*HarnessA
 	if strings.TrimSpace(worktreeRoot) == "" {
 		return nil, fmt.Errorf("remote worktree root is required")
 	}
-	return &HarnessAllocator{manager: manager, worktreeRoot: filepath.Clean(worktreeRoot)}, nil
+	return &HarnessAllocator{manager: manager, worktreeRoot: filepath.Clean(worktreeRoot), git: ExecGitInspector{}}, nil
 }
 
 func (a *HarnessAllocator) Allocate(ctx context.Context, request Request) (Allocation, error) {
@@ -67,6 +92,27 @@ func (a *HarnessAllocator) Allocate(ctx context.Context, request Request) (Alloc
 	}
 	if strings.TrimSpace(request.Repository.CanonicalPath) == "" || strings.TrimSpace(string(request.Repository.ID)) == "" {
 		return Allocation{}, fmt.Errorf("registered repository path and id are required")
+	}
+
+	repoRoot := strings.TrimSpace(request.Repository.GitRoot)
+	if repoRoot == "" {
+		repoRoot = request.Repository.CanonicalPath
+	}
+	baseRef := strings.TrimSpace(request.BaseRef)
+	if baseRef == "" {
+		baseRef = strings.TrimSpace(request.Repository.DefaultBranch)
+	}
+	if baseRef == "" {
+		baseRef = "HEAD"
+	}
+	if request.Mode == model.IsolationWorktree && !request.AllowDirtyBase {
+		status, err := a.git.Status(ctx, repoRoot)
+		if err != nil {
+			return Allocation{}, fmt.Errorf("inspect repository before worktree allocation: %w", err)
+		}
+		if status.Dirty {
+			return Allocation{}, fmt.Errorf("%s: %w", repoRoot, ErrDirtyRepository)
+		}
 	}
 
 	harnessID := harnessmodel.WorkspaceID(request.WorkspaceID)
@@ -95,34 +141,24 @@ func (a *HarnessAllocator) Allocate(ctx context.Context, request Request) (Alloc
 		Metadata: map[string]string{
 			"remote_session_id": string(request.SessionID),
 			"isolation_mode":    string(request.Mode),
+			"base_ref":          baseRef,
 		},
 	})
 	if err != nil {
 		return Allocation{}, err
 	}
 
-	repoRoot := strings.TrimSpace(request.Repository.GitRoot)
-	if repoRoot == "" {
-		repoRoot = request.Repository.CanonicalPath
-	}
 	allocation := Allocation{
 		ID:        request.WorkspaceID,
 		HarnessID: record.ID,
 		Path:      workspacePath,
 		Branch:    branch,
+		BaseRef:   baseRef,
 		Mode:      request.Mode,
 		RepoRoot:  repoRoot,
 	}
 	if request.Mode != model.IsolationWorktree {
 		return allocation, nil
-	}
-
-	baseRef := strings.TrimSpace(request.BaseRef)
-	if baseRef == "" {
-		baseRef = strings.TrimSpace(request.Repository.DefaultBranch)
-	}
-	if baseRef == "" {
-		baseRef = "HEAD"
 	}
 	if err := a.manager.CreateGitWorktree(ctx, repoRoot, branch, workspacePath, baseRef); err != nil {
 		_ = a.manager.Release(context.Background(), record.ID)
@@ -144,6 +180,31 @@ func (a *HarnessAllocator) Release(ctx context.Context, allocation Allocation) e
 		return removeErr
 	}
 	return releaseErr
+}
+
+// BuildHandoff never merges automatically. It creates an explicit integration
+// descriptor that can be passed to a controlled Harness verification/merge
+// workflow after the remote write session has finished.
+func BuildHandoff(allocation Allocation, targetBranch string) (Handoff, error) {
+	if allocation.Mode != model.IsolationWorktree || strings.TrimSpace(allocation.Branch) == "" || strings.TrimSpace(allocation.Path) == "" {
+		return Handoff{}, fmt.Errorf("merge handoff requires a git worktree allocation")
+	}
+	targetBranch = strings.TrimSpace(targetBranch)
+	if targetBranch == "" {
+		targetBranch = allocation.BaseRef
+	}
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+	return Handoff{
+		WorkspaceID:  allocation.ID,
+		RepoRoot:     allocation.RepoRoot,
+		WorktreePath: allocation.Path,
+		SourceBranch: allocation.Branch,
+		BaseRef:      allocation.BaseRef,
+		TargetBranch: targetBranch,
+		Strategy:     "VERIFY_THEN_MERGE_VIA_HARNESS",
+	}, nil
 }
 
 var slugInvalid = regexp.MustCompile(`[^a-z0-9]+`)
