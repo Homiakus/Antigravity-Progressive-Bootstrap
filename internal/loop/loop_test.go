@@ -169,13 +169,20 @@ func managedLoopPlan(task string) string {
 
 ### Context Compression Checkpoint — after T-027
 
-` + "`CURRENT QUALIFIED MILESTONE:` machine publication proof.  \n" +
+` + "`CURRENT HEAD:` published-main-head.  \n" +
+		"`CURRENT QUALIFIED MILESTONE:` machine publication proof.  \n" +
+		"`ARCHITECTURE:` completion validator observes but does not publish.  \n" +
 		"`CRITICAL INVARIANTS:` I-028,I-030.  \n" +
 		"`COMPLETED THIS ITERATION:` " + task + ".  \n" +
+		"`RESOLVED FINDINGS:` F-027.  \n" +
+		"`OPEN CRITICAL/HIGH FINDINGS:` none.  \n" +
+		"`BLOCKERS:` none.  \n" +
 		"`NEXT TASK:` T-028.  \n" +
 		"`WHY NEXT:` role isolation.  \n" +
+		"`CRITICAL FILES:` internal/loop/loop.go.  \n" +
 		"`VERIFICATION COMMANDS:` go test ./....  \n" +
 		"`IMPORTANT DECISIONS:` validator is read-only.  \n" +
+		"`REJECTED OPTIONS:` free-form publication claims.  \n" +
 		"`NEW PROCESS LEARNING:` publication claims need observation.\n"
 }
 
