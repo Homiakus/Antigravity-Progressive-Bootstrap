@@ -27,7 +27,7 @@ func (s *Store) GetTelegramBindingBySession(ctx context.Context, sessionID model
 func (s *Store) GetTelegramMirrorState(ctx context.Context, sessionID model.RemoteSessionID) (model.TelegramMirrorState, error) {
 	var item model.TelegramMirrorState
 	var updated string
-	err := s.db.QueryRowContext(ctx, `SELECT session_id,chat_id,thread_id,message_id,last_event_seq,rendered_text,updated_at FROM telegram_mirror_state WHERE session_id=?`, sessionID).Scan(&item.SessionID,&item.ChatID,&item.ThreadID,&item.MessageID,&item.LastEventSeq,&item.RenderedText,&updated)
+	err := s.db.QueryRowContext(ctx, `SELECT session_id,chat_id,thread_id,stream_key,message_id,last_event_seq,rendered_text,updated_at FROM telegram_mirror_state WHERE session_id=?`, sessionID).Scan(&item.SessionID,&item.ChatID,&item.ThreadID,&item.StreamKey,&item.MessageID,&item.LastEventSeq,&item.RenderedText,&updated)
 	if errors.Is(err, sql.ErrNoRows) { return model.TelegramMirrorState{}, remotestore.ErrNotFound }
 	if err != nil { return model.TelegramMirrorState{}, err }
 	item.UpdatedAt, err = parseTime(updated)
@@ -36,7 +36,7 @@ func (s *Store) GetTelegramMirrorState(ctx context.Context, sessionID model.Remo
 
 func (s *Store) UpsertTelegramMirrorState(ctx context.Context, state model.TelegramMirrorState) error {
 	if err := state.Validate(); err != nil { return err }
-	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_mirror_state(session_id,chat_id,thread_id,message_id,last_event_seq,rendered_text,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET chat_id=excluded.chat_id,thread_id=excluded.thread_id,message_id=excluded.message_id,last_event_seq=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.last_event_seq ELSE telegram_mirror_state.last_event_seq END,rendered_text=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.rendered_text ELSE telegram_mirror_state.rendered_text END,updated_at=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.updated_at ELSE telegram_mirror_state.updated_at END`, state.SessionID,state.ChatID,state.ThreadID,state.MessageID,state.LastEventSeq,state.RenderedText,formatTime(state.UpdatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO telegram_mirror_state(session_id,chat_id,thread_id,stream_key,message_id,last_event_seq,rendered_text,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET chat_id=excluded.chat_id,thread_id=excluded.thread_id,stream_key=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.stream_key ELSE telegram_mirror_state.stream_key END,message_id=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.message_id ELSE telegram_mirror_state.message_id END,last_event_seq=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.last_event_seq ELSE telegram_mirror_state.last_event_seq END,rendered_text=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.rendered_text ELSE telegram_mirror_state.rendered_text END,updated_at=CASE WHEN excluded.last_event_seq >= telegram_mirror_state.last_event_seq THEN excluded.updated_at ELSE telegram_mirror_state.updated_at END`, state.SessionID,state.ChatID,state.ThreadID,state.StreamKey,state.MessageID,state.LastEventSeq,state.RenderedText,formatTime(state.UpdatedAt))
 	return err
 }
 

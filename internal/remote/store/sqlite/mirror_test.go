@@ -31,12 +31,25 @@ func TestTelegramMirrorStateNeverMovesBackward(t *testing.T) {
 	defer done()
 	seedRemoteGraph(t, ctx, store)
 	now:=time.Unix(2000,0).UTC()
-	first:=model.TelegramMirrorState{SessionID:"rsi_1700000000000_00000000000000000001",ChatID:99,MessageID:7,LastEventSeq:5,RenderedText:"new",UpdatedAt:now}
-	if err:=store.UpsertTelegramMirrorState(ctx,first);err!=nil{t.Fatal(err)}	
-	stale:=first;stale.LastEventSeq=3;stale.RenderedText="old";stale.UpdatedAt=now.Add(time.Second)
+	first:=model.TelegramMirrorState{SessionID:"rsi_1700000000000_00000000000000000001",ChatID:99,StreamKey:"p1:step:5",MessageID:7,LastEventSeq:5,RenderedText:"new",UpdatedAt:now}
+	if err:=store.UpsertTelegramMirrorState(ctx,first);err!=nil{t.Fatal(err)}
+	stale:=first;stale.StreamKey="p1:step:3";stale.MessageID=3;stale.LastEventSeq=3;stale.RenderedText="old";stale.UpdatedAt=now.Add(time.Second)
 	if err:=store.UpsertTelegramMirrorState(ctx,stale);err!=nil{t.Fatal(err)}
 	got,err:=store.GetTelegramMirrorState(ctx,first.SessionID);if err!=nil{t.Fatal(err)}
-	if got.LastEventSeq!=5||got.RenderedText!="new"{t.Fatalf("mirror=%#v",got)}
+	if got.LastEventSeq!=5||got.RenderedText!="new"||got.StreamKey!="p1:step:5"||got.MessageID!=7{t.Fatalf("mirror=%#v",got)}
+}
+
+func TestTelegramMirrorStateCanAdvanceToNewStream(t *testing.T) {
+	ctx, store, done := openRemoteTestStore(t)
+	defer done()
+	seedRemoteGraph(t, ctx, store)
+	now:=time.Unix(2000,0).UTC()
+	first:=model.TelegramMirrorState{SessionID:"rsi_1700000000000_00000000000000000001",ChatID:99,StreamKey:"p1:step:5",MessageID:7,LastEventSeq:5,RenderedText:"first",UpdatedAt:now}
+	if err:=store.UpsertTelegramMirrorState(ctx,first);err!=nil{t.Fatal(err)}
+	next:=first;next.StreamKey="p1:step:8";next.MessageID=11;next.LastEventSeq=8;next.RenderedText="second";next.UpdatedAt=now.Add(time.Second)
+	if err:=store.UpsertTelegramMirrorState(ctx,next);err!=nil{t.Fatal(err)}
+	got,err:=store.GetTelegramMirrorState(ctx,first.SessionID);if err!=nil{t.Fatal(err)}
+	if got.StreamKey!=next.StreamKey||got.MessageID!=11||got.RenderedText!="second"{t.Fatalf("mirror=%#v",got)}
 }
 
 func TestRemoteOutboxRetryThenDelivery(t *testing.T) {

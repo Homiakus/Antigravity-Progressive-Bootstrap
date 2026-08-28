@@ -38,6 +38,7 @@ type TelegramMirrorState struct {
 	SessionID    RemoteSessionID
 	ChatID       int64
 	ThreadID     int64
+	StreamKey    string
 	MessageID    int64
 	LastEventSeq uint64
 	RenderedText string
@@ -50,6 +51,9 @@ func (s TelegramMirrorState) Validate() error {
 	}
 	if s.ChatID == 0 || s.MessageID < 0 || s.UpdatedAt.IsZero() {
 		return fmt.Errorf("telegram mirror chat, non-negative message id and updated_at are required")
+	}
+	if s.MessageID > 0 && strings.TrimSpace(s.StreamKey) == "" {
+		return fmt.Errorf("telegram mirror stream_key is required once a message exists")
 	}
 	return nil
 }
