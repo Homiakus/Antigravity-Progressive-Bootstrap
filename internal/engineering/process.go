@@ -96,21 +96,82 @@ func RequiredCompletionEvidence() []string {
 }
 
 // ValidateCompletion applies the executable portion of the living-plan
-// engineering process. It intentionally validates observable evidence and plan
-// linkage rather than pretending to prove that a command was truthful.
+// engineering process for one explicit workspace root.
 func ValidateCompletion(start string, verification []string) (CompletionEvidence, error) {
 	path, planBytes, managed, err := LocatePlan(start)
 	if err != nil {
 		return CompletionEvidence{}, err
 	}
-	result := CompletionEvidence{
-		Managed:      managed,
-		PlanPath:     path,
+	if !managed {
+		return unmanagedEvidence(verification), nil
+	}
+	return validateManagedCompletion(path, planBytes, verification)
+}
+
+// ValidateCompletionForWorkspaces resolves the plan from the workspaces that
+// belong to the task, never from unrelated ambient process state. If explicit
+// workspaces resolve to more than one living plan the gate fails closed because
+// a single T-XXX cannot safely represent two independent execution roadmaps.
+// fallback is consulted only for legacy task-state records that predate
+// workspace persistence.
+func ValidateCompletionForWorkspaces(workspaces []string, fallback string, verification []string) (CompletionEvidence, error) {
+	starts := nonEmptyUnique(workspaces)
+	if len(starts) == 0 && strings.TrimSpace(fallback) != "" {
+		starts = []string{fallback}
+	}
+	if len(starts) == 0 {
+		return unmanagedEvidence(verification), nil
+	}
+
+	type planRef struct {
+		path string
+		data []byte
+	}
+	plans := map[string]planRef{}
+	for _, start := range starts {
+		path, data, managed, err := LocatePlan(start)
+		if err != nil {
+			return CompletionEvidence{}, fmt.Errorf("resolve living plan for workspace %q: %w", start, err)
+		}
+		if !managed {
+			continue
+		}
+		cleanPath, err := filepath.Abs(path)
+		if err != nil {
+			return CompletionEvidence{}, err
+		}
+		plans[cleanPath] = planRef{path: cleanPath, data: data}
+	}
+	if len(plans) == 0 {
+		return unmanagedEvidence(verification), nil
+	}
+	if len(plans) > 1 {
+		paths := make([]string, 0, len(plans))
+		for path := range plans {
+			paths = append(paths, path)
+		}
+		sort.Strings(paths)
+		return CompletionEvidence{}, fmt.Errorf("task workspaces resolve to multiple %s files; split the work into one living-plan task per repository: %s", PlanFileName, strings.Join(paths, ", "))
+	}
+	for _, ref := range plans {
+		return validateManagedCompletion(ref.path, ref.data, verification)
+	}
+	panic("unreachable")
+}
+
+func unmanagedEvidence(verification []string) CompletionEvidence {
+	return CompletionEvidence{
 		Categories:   map[string][]string{},
 		Verification: append([]string(nil), verification...),
 	}
-	if !managed {
-		return result, nil
+}
+
+func validateManagedCompletion(path string, planBytes []byte, verification []string) (CompletionEvidence, error) {
+	result := CompletionEvidence{
+		Managed:      true,
+		PlanPath:     path,
+		Categories:   map[string][]string{},
+		Verification: append([]string(nil), verification...),
 	}
 
 	for _, raw := range verification {
@@ -228,6 +289,23 @@ func splitIDs(value string) []string {
 	}
 	value = strings.NewReplacer(",", " ", ";", " ", "|", " ").Replace(trimmed)
 	return strings.Fields(value)
+}
+
+func nonEmptyUnique(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func uniqueSorted(values []string) []string {
