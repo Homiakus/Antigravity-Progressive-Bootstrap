@@ -22,7 +22,7 @@ Provider-control-plane foundation completed/verified through T-006:
 - T-002 observation adapter/registry: `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 SQLite v14 provider-observation schema: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 durable provider observation Store/SQLite implementation: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
-- T-006 Antigravity status-line/headless observation adapter: fully verified on validation head `9cf0da3e3080ebd72763b42f40827004e11c62b8`; atomic publication is the current iteration's final action.
+- T-006 Antigravity status-line/headless observation adapter: `a46eb75f947f97f62a06129e3469fe18466d6843`.
 
 Next highest-leverage work is Codex App Server observation ingestion (T-007), while T-005 v15 assignment/reservation/usage persistence remains unblocked.
 
@@ -75,15 +75,11 @@ Harness CI enforces module tidiness, bridge syntax/contracts, `go test ./...`, `
 
 Persistence is SQLite schema v14. Migrations 1..13 are immutable checksummed releases; v14 is append-only provider observation schema.
 
-T-006 verification on `9cf0da3e3080ebd72763b42f40827004e11c62b8`:
+T-006 verification:
 
-- module graph tidy: PASS;
-- bridge syntax/contracts: PASS;
-- unit/integration: PASS;
-- race detector: PASS;
-- vet: PASS;
-- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
-- Windows tests: PASS.
+- implementation head `9cf0da3e3080ebd72763b42f40827004e11c62b8`: full Linux/Windows Harness CI PASS;
+- reconciled head `136cb2c8f5594d2ba8d3abb2e83371303f01d215`: full Linux/Windows Harness CI PASS;
+- published atomic tree: `a46eb75f947f97f62a06129e3469fe18466d6843`, fast-forward to `main`, no force.
 
 ## 5. System Invariants
 
@@ -244,14 +240,16 @@ Account/model/session upsert/read/list, atomic capacity snapshot+window append, 
 Add `provider_assignments`, `provider_reservations`, `provider_usage_samples`, `provider_circuit_state`. Reservation states ACTIVE/SETTLED/RELEASED/EXPIRED. Tests: FK/CHECK, idempotent settlement foundations, CAS/concurrency. Dependencies: T-004.
 
 ### T-006 — Implement Antigravity observation adapter
-**Status:** DONE / VERIFIED, publication pending. **Priority:** P0. **Leverage:** HIGH.  
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
 Files: `internal/harness/provider/antigravity/{adapter.go,adapter_test.go,coherent.go,coherent_test.go}` plus provider-neutral coherent snapshot contract in `internal/harness/provider/provider.go`.  
 Signals: official status-line JSON (`model`, `conversation_id/session_id`, `context_window`, `quota`) and terminal headless JSON/stream-json usage. Unknown fields are tolerated; known malformed fields and >1 MiB payloads fail closed. Sensitive fields such as email/transcript/workspace path are not persisted; workspace affinity is SHA-256 fingerprinted.  
 Quota: native bucket IDs and reset timestamps are preserved; `remaining_fraction` maps only to FRACTION; missing semantics remain OPAQUE; bucket-to-model mapping is intentionally unset without provider evidence. Valid telemetry does not imply HEALTHY; only fully known zero quota is classified EXHAUSTED, otherwise health remains UNKNOWN.  
 Context: official context-window percentage/limit becomes session context occupancy; no routing threshold is applied here. Headless cumulative token usage is parsed losslessly but is not misclassified as quota/context.  
 Coherence: `SnapshotSource.Observe` derives capacity/models/sessions from one payload; test proves one source read.  
 Tests: documented representative payload, unknown/missing fields, deterministic bucket ordering, opaque buckets, exhaustion proof, context/workspace privacy, malformed bounds/reset/product/identity, size cap, generic Adapter contracts, one-shot and stream-json headless usage, non-terminal/negative usage rejection, coherent single-read proof.  
-Verification: full Linux/Windows Harness CI PASS on `9cf0da3e3080ebd72763b42f40827004e11c62b8`. Dependencies: T-002,T-004.
+Verification: full Linux/Windows Harness CI PASS on implementation and reconciled validation heads.  
+Commit: `a46eb75f947f97f62a06129e3469fe18466d6843`.  
+Push: `main`, fast-forward, no force. Dependencies: T-002,T-004.
 
 ### T-007 — Implement Codex App Server observation adapter
 **Status:** READY. **Priority:** P0. **Leverage:** HIGH.  
@@ -377,7 +375,7 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - T-002 DONE — `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 DONE — `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 DONE — `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
-- T-006 DONE/VERIFIED — validation head `9cf0da3e3080ebd72763b42f40827004e11c62b8`; publication commit to be recorded after fast-forward.
+- T-006 DONE — `a46eb75f947f97f62a06129e3469fe18466d6843`.
 
 ## 20. Iteration Log
 
@@ -405,10 +403,11 @@ SQLite v14 observation schema; F-014 remote-main movement recorded. Full Harness
 **Unexpected findings:** official Antigravity status-line gives fractional quota/reset and context/model/session but no authoritative service-health proof or bucket->model mapping; headless usage is cumulative across resumed sessions; Codex pre-audit exposed sparse rate-limit deltas and absent model/bucket mapping (F-017).  
 **Changes:** bounded/tolerant Antigravity parser, status-line source adapter, coherent provider `Observation`/`SnapshotSource`, privacy-preserving workspace fingerprint, headless usage parser.  
 **Tests:** documented/missing/unknown/malformed/oversized status-line cases; quota semantics/order/exhaustion; context/session privacy; Adapter contracts; headless JSON/stream result; coherent one-read proof.  
-**Verification:** full Linux/Windows Harness CI PASS on `9cf0da3e3080ebd72763b42f40827004e11c62b8`.  
+**Verification:** full Linux/Windows Harness CI PASS on implementation and reconciled validation heads.  
 **Plan changes:** I-016/I-017; F-016 resolved; F-017 planned; T-006 DONE; T-007 contract tightened.  
-**Commit/Push:** atomic fast-forward publication to `main` is the current final action; no force.  
-**Result:** PASS pending publication checkpoint.
+**Commit:** `a46eb75f947f97f62a06129e3469fe18466d6843`.  
+**Push:** `main`, fast-forward, no force.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
