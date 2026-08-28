@@ -64,16 +64,18 @@ func (p Policy) Validate() error {
 // Window is the normalized, explainable view of one native quota window.
 // Absolute units remain untouched; RawFraction is derived only when the source
 // explicitly provides a fraction or both limit and remaining make the ratio
-// mathematically justified.
+// mathematically justified. EffectiveRemaining is produced only for absolute
+// TOKENS/REQUESTS/COST metrics and never by inventing a missing limit.
 type Window struct {
 	ID                  string
 	ModelID             harnessmodel.ProviderModelID
 	Metric              harnessmodel.QuotaMetricKind
 	Limit               *float64
 	Remaining           *float64
+	EffectiveRemaining  *float64
 	RawFraction          *float64
 	EffectiveFraction    *float64
-	ResetAt             *time.Time
+	ResetAt              *time.Time
 	ObservedAt           time.Time
 	Age                  time.Duration
 	Freshness            float64
@@ -88,39 +90,45 @@ type Window struct {
 // REQUESTS, COST, FRACTION and OPAQUE are never summed or converted into one
 // another.
 type MetricHeadroom struct {
-	Metric              harnessmodel.QuotaMetricKind
-	Windows             int
-	QuantifiedWindows   int
-	UnknownWindows      int
-	ExpiredWindows      int
-	RawFraction         *float64
-	EffectiveFraction   *float64
-	BottleneckWindowID  string
+	Metric             harnessmodel.QuotaMetricKind
+	Windows            int
+	QuantifiedWindows  int
+	FractionalWindows  int
+	AbsoluteWindows    int
+	UnknownWindows     int
+	ExpiredWindows     int
+	RawFraction        *float64
+	EffectiveFraction  *float64
+	BottleneckWindowID string
 }
 
 // Summary is a provider-neutral capacity view suitable for later reservation
 // and selector layers. HeadroomFraction is the minimum effective fraction among
-// all quantified windows: a conservative lower bound, not an exhaustion proof.
+// fraction-capable windows: a conservative lower bound, not an exhaustion proof.
+// Absolute headroom remains per-window so unlike/overlapping limits are never
+// summed.
 type Summary struct {
-	AccountID            harnessmodel.ProviderAccountID
-	Provider             harnessmodel.ProviderKind
-	SourceHealth         harnessmodel.ProviderHealth
-	ObservedAt           time.Time
-	Age                  time.Duration
-	SnapshotFreshness    float64
-	ActiveRuns           int
-	State                EvidenceState
-	Windows              []Window
-	Metrics              []MetricHeadroom
-	QuantifiedWindows    int
-	UnknownWindows       int
-	ExpiredWindows       int
-	UncertainWindows     int
-	RawHeadroomFraction  *float64
-	HeadroomFraction     *float64
-	BottleneckWindowID   string
-	EarliestResetAt      *time.Time
-	ProvenExhausted      bool
+	AccountID           harnessmodel.ProviderAccountID
+	Provider            harnessmodel.ProviderKind
+	SourceHealth        harnessmodel.ProviderHealth
+	ObservedAt          time.Time
+	Age                 time.Duration
+	SnapshotFreshness   float64
+	ActiveRuns          int
+	State               EvidenceState
+	Windows             []Window
+	Metrics             []MetricHeadroom
+	QuantifiedWindows   int
+	FractionalWindows   int
+	AbsoluteWindows     int
+	UnknownWindows      int
+	ExpiredWindows      int
+	UncertainWindows    int
+	RawHeadroomFraction *float64
+	HeadroomFraction    *float64
+	BottleneckWindowID  string
+	EarliestResetAt     *time.Time
+	ProvenExhausted     bool
 }
 
 // Normalize converts an immutable provider capacity snapshot into conservative,
@@ -180,8 +188,16 @@ func Normalize(snapshot harnessmodel.ProviderCapacitySnapshot, now time.Time, po
 		if normalized.Expired {
 			result.ExpiredWindows++
 		}
-		if normalized.RawFraction != nil {
+		fractional := normalized.RawFraction != nil
+		absolute := normalized.EffectiveRemaining != nil
+		quantified := fractional || absolute
+		if quantified {
 			result.QuantifiedWindows++
+		} else {
+			result.UnknownWindows++
+		}
+		if fractional {
+			result.FractionalWindows++
 			result.RawHeadroomFraction = minFraction(result.RawHeadroomFraction, *normalized.RawFraction)
 			if normalized.EffectiveFraction != nil {
 				if result.HeadroomFraction == nil || *normalized.EffectiveFraction < *result.HeadroomFraction {
@@ -190,8 +206,9 @@ func Normalize(snapshot harnessmodel.ProviderCapacitySnapshot, now time.Time, po
 					result.BottleneckWindowID = normalized.ID
 				}
 			}
-		} else {
-			result.UnknownWindows++
+		}
+		if absolute {
+			result.AbsoluteWindows++
 		}
 		if normalized.Expired || normalized.EffectiveConfidence < 1-fractionEpsilon {
 			result.UncertainWindows++
@@ -211,16 +228,22 @@ func Normalize(snapshot harnessmodel.ProviderCapacitySnapshot, now time.Time, po
 		if normalized.Expired {
 			m.ExpiredWindows++
 		}
-		if normalized.RawFraction == nil {
-			m.UnknownWindows++
-		} else {
+		if quantified {
 			m.QuantifiedWindows++
+		} else {
+			m.UnknownWindows++
+		}
+		if fractional {
+			m.FractionalWindows++
 			m.RawFraction = minFraction(m.RawFraction, *normalized.RawFraction)
 			if normalized.EffectiveFraction != nil && (m.EffectiveFraction == nil || *normalized.EffectiveFraction < *m.EffectiveFraction) {
 				v := *normalized.EffectiveFraction
 				m.EffectiveFraction = &v
 				m.BottleneckWindowID = normalized.ID
 			}
+		}
+		if absolute {
+			m.AbsoluteWindows++
 		}
 	}
 
@@ -266,6 +289,13 @@ func normalizeWindow(native harnessmodel.QuotaWindow, now time.Time, policy Poli
 		EffectiveConfidence: effectiveConfidence,
 		Expired:            expired,
 		ExpiredByReset:     expiredByReset,
+	}
+	if isAbsoluteMetric(native.Metric) && native.Remaining != nil {
+		v := *native.Remaining * effectiveConfidence
+		if v < 0 {
+			v = 0
+		}
+		out.EffectiveRemaining = &v
 	}
 	if rawFraction != nil {
 		v := *rawFraction * effectiveConfidence
@@ -378,8 +408,8 @@ func validateFiniteWindow(w harnessmodel.QuotaWindow) error {
 		return fmt.Errorf("confidence must be finite")
 	}
 	for name, value := range map[string]*float64{
-		"limit": w.Limit,
-		"remaining": w.Remaining,
+		"limit":             w.Limit,
+		"remaining":         w.Remaining,
 		"remainingFraction": w.RemainingFraction,
 	} {
 		if value != nil && !finite(*value) {
@@ -387,6 +417,15 @@ func validateFiniteWindow(w harnessmodel.QuotaWindow) error {
 		}
 	}
 	return nil
+}
+
+func isAbsoluteMetric(metric harnessmodel.QuotaMetricKind) bool {
+	switch metric {
+	case harnessmodel.QuotaMetricTokens, harnessmodel.QuotaMetricRequests, harnessmodel.QuotaMetricCost:
+		return true
+	default:
+		return false
+	}
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
