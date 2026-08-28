@@ -34,7 +34,7 @@ CREATE TABLE provider_reservations (
     window_id TEXT NOT NULL CHECK(length(window_id) BETWEEN 1 AND 512),
     model_id TEXT NOT NULL DEFAULT '',
     metric TEXT NOT NULL CHECK(metric IN ('TOKENS','REQUESTS','COST','FRACTION')),
-    amount REAL NOT NULL CHECK(amount > 0),
+    amount REAL NOT NULL CHECK(amount > 0 AND (metric <> 'FRACTION' OR amount <= 1)),
     state TEXT NOT NULL CHECK(state IN ('ACTIVE','SETTLED','RELEASED','EXPIRED')),
     revision INTEGER NOT NULL CHECK(revision > 0),
     created_at TEXT NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE provider_usage_samples (
     account_id TEXT NOT NULL,
     model_id TEXT NOT NULL DEFAULT '',
     metric TEXT NOT NULL CHECK(metric IN ('TOKENS','REQUESTS','COST','FRACTION')),
-    amount REAL NOT NULL CHECK(amount >= 0),
+    amount REAL NOT NULL CHECK(amount >= 0 AND (metric <> 'FRACTION' OR amount <= 1)),
     observed_at TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY(assignment_id, account_id)
