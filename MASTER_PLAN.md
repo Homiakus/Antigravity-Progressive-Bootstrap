@@ -24,9 +24,9 @@ Provider-control-plane foundation completed/verified through T-009:
 - T-004 durable provider observation Store/SQLite implementation: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 - T-006 Antigravity observation adapter: `a46eb75f947f97f62a06129e3469fe18466d6843`.
 - T-007 Codex App Server observation adapter: `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
-- T-009 provider-neutral capacity normalization/effective headroom: fully verified on validation head `b66d68c18edb3e138dc1acf988d7315fb252871f`; atomic publication is the current iteration's final action.
+- T-009 provider-neutral capacity normalization/effective headroom: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.
 
-Next highest-leverage work after publication: T-005 SQLite v15 assignment/reservation/usage/circuit persistence. T-010 then becomes unblocked by T-005 + T-009.
+Next highest-leverage work: T-005 SQLite v15 assignment/reservation/usage/circuit persistence. T-010 then becomes unblocked by T-005 + T-009.
 
 ## 3. Architecture Map
 
@@ -83,17 +83,11 @@ Harness CI enforces module tidiness, bridge syntax/contracts, `go test ./...`, `
 
 Persistence is SQLite schema v14. Migrations 1..13 are immutable checksummed releases; v14 is append-only provider observation schema.
 
-T-009 verification on `b66d68c18edb3e138dc1acf988d7315fb252871f`:
+T-009 verification:
 
-- module graph tidy: PASS;
-- bridge syntax/contracts: PASS;
-- unit/integration: PASS;
-- race detector: PASS;
-- vet: PASS;
-- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
-- Windows tests: PASS;
-- provider-neutral normalizer adapter integration: PASS;
-- fuzz/property seed corpus and 100-window benchmark compile: PASS.
+- implementation head `b66d68c18edb3e138dc1acf988d7315fb252871f`: full Linux/Windows Harness CI PASS;
+- reconciled head `3e24d94f822fe5b8d73c8f6a61282bb65334e8f3`: full Linux/Windows Harness CI PASS;
+- published atomic tree: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`, fast-forward to `main`, no force.
 
 ## 5. System Invariants
 
@@ -295,17 +289,19 @@ Verification: full Linux/Windows Harness CI PASS. Commit `cefead407f3ad4a11ac463
 REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE using context headroom, workspace affinity, health and model requirements; include hysteresis. For Codex, absence of authoritative thread->model binding must degrade to NEW/UNAVAILABLE rather than fabricate reuse affinity. Dependencies: T-004,T-006,T-007.
 
 ### T-009 — Normalize capacity and effective headroom
-**Status:** DONE / VERIFIED, publication pending. **Priority:** P0. **Leverage:** HIGH.  
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
 Files: `internal/harness/provider/capacity/{normalize.go,normalize_test.go,absolute_test.go,adapter_integration_test.go}`.  
 Semantics: preserves TOKENS/REQUESTS/COST/FRACTION/OPAQUE and native ModelID/window IDs; never sums unlike or potentially overlapping windows. Fractional lower bound is the minimum of independently justified effective fractions. Absolute TOKENS/REQUESTS/COST `remaining` without a denominator remains `EffectiveRemaining` in native units and never becomes an invented fraction.  
 Uncertainty: configurable `FreshFor/ExpireAfter/MaxFutureSkew`; linear freshness decay multiplies source confidence. Windows observed before `resetAt` expire once the reset passes. Snapshot and per-window age are tracked independently.  
 Evidence: UNKNOWN/PARTIAL/QUANTIFIED/STALE/EXHAUSTED/UNAVAILABLE is separate from `ProviderHealth`; an effective zero caused by low confidence/staleness is not an exhaustion proof. Only source provider evidence carries `ProvenExhausted`.  
 Validation: rejects NaN/Inf, remaining above limit, invalid zero-limit states, contradictory explicit fraction vs remaining/limit and duplicate native window IDs; deterministic ordering; no model/bucket inference.  
 Tests: metric separation, conservative bottleneck, absolute remaining without limit, confidence/freshness decay, reset crossing, zero-vs-exhaustion separation, unavailable/exhausted source states, OPAQUE behavior, contradictory/non-finite telemetry, duplicate IDs, deterministic ordering/model attribution, mixed known/unknown evidence, clock skew, earliest reset, policy validation, Antigravity/Codex integration, fuzz fraction bounds and 100-window benchmark.  
-Verification: full Linux/Windows Harness CI PASS on `b66d68c18edb3e138dc1acf988d7315fb252871f`. Dependencies: T-004,T-006,T-007.
+Verification: full Linux/Windows Harness CI PASS on implementation and reconciled validation heads.  
+Commit: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.  
+Push: `main`, fast-forward, no force. Dependencies: T-004,T-006,T-007.
 
 ### T-010 — Add conservative demand estimator
-**Status:** BLOCKED ON T-005 PUBLICATION + T-009 PUBLICATION. **Priority:** P1.  
+**Status:** BLOCKED ON T-005. **Priority:** P1.  
 Robust historical p50/p80 by task/provider/model/repository/context class; p80 reservation, no ML initially. Preserve demand units so native absolute headroom is compared only with compatible estimates. Dependencies: T-005,T-009.
 
 ### T-011 — Implement atomic provider reservations
@@ -426,7 +422,7 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - T-004 DONE — `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 - T-006 DONE — `a46eb75f947f97f62a06129e3469fe18466d6843`.
 - T-007 DONE — `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
-- T-009 DONE/VERIFIED — validation head `b66d68c18edb3e138dc1acf988d7315fb252871f`; publication commit recorded after fast-forward.
+- T-009 DONE — `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.
 
 ## 20. Iteration Log
 
@@ -461,10 +457,11 @@ Antigravity bounded/tolerant observation adapter, coherent snapshot source, priv
 **Unexpected findings:** durable observation validation is intentionally broader than safe routing arithmetic; absolute remaining can be useful without a limit; a recent timestamp can still belong to the previous quota period after reset.  
 **Changes:** pure provider-neutral capacity normalizer; unit-preserving native windows; effective absolute/fractional headroom; configurable freshness/confidence decay; reset-aware expiry; evidence-state separation from provider health; deterministic conservative bottleneck.  
 **Tests:** metric separation, absolute remaining, freshness/confidence, resets, zero/exhaustion, OPAQUE, malformed/non-finite telemetry, duplicates, model attribution, mixed evidence, future skew, provider adapter integration, fuzz fraction invariants and 100-window benchmark.  
-**Verification:** full Linux/Windows Harness CI PASS on `b66d68c18edb3e138dc1acf988d7315fb252871f`.  
+**Verification:** full Linux/Windows Harness CI PASS on implementation head `b66d68c18edb3e138dc1acf988d7315fb252871f` and reconciled head `3e24d94f822fe5b8d73c8f6a61282bb65334e8f3`.  
 **Plan changes:** I-020/I-021/I-022; F-020/F-021/F-022 resolved; T-009 DONE; T-005 NEXT; T-010 contract tightened to preserve demand units.  
-**Commit/Push:** atomic fast-forward publication is current final action; no force.  
-**Result:** PASS pending publication checkpoint.
+**Commit:** `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.  
+**Push:** `main`, fast-forward, no force.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
