@@ -21,7 +21,7 @@ Current missing layer: provider-account/model/session capacity and assignment. S
 Completed foundation:
 
 - T-001 provider-domain primitives are on `main` as `bf060a70833504fc5dc979181d59453276a56e0c`.
-- T-002 observation adapter/registry is implemented on the validation branch and is in verification.
+- T-002 observation adapter/registry is verified and complete in the current iteration.
 
 ## 3. Architecture Map
 
@@ -223,16 +223,17 @@ Verification: full Linux/Windows Harness CI PASS.
 Commit on main: `bf060a70833504fc5dc979181d59453276a56e0c`.
 
 ### T-002 — Define observation adapter and live registry
-**Status:** VERIFYING. **Priority:** P0. **Leverage:** HIGH.  
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
 Files: `internal/harness/provider/provider.go`, `registry.go`, `registry_test.go`.  
-Implement account-scoped `CapacitySource`, `ModelSource`, `SessionSource`, composite observation `Adapter`, and concurrency-safe deterministic `Registry`. Registry binds durable account identity to the live refresh adapter; it does not persist observations.  
-Non-goal: do not define portable provider execution yet; T-013/T-014 own that boundary after TaskEnvelope exists.  
+Implemented account-scoped `CapacitySource`, `ModelSource`, `SessionSource`, composite observation `Adapter`, and concurrency-safe deterministic `Registry`. Registry binds durable account identity to the live refresh adapter; it does not persist observations.  
+Non-goal: portable provider execution is deferred; T-013/T-014 own that boundary after TaskEnvelope exists.  
 Tests: register/get/list, deterministic ordering, duplicate rejection, provider-kind mismatch, invalid state/identity, concurrent register/read under race detector.  
+Verification: full Linux/Windows Harness CI PASS, including unit/integration, race, vet and all configured smoke benchmarks.  
 Acceptance: no scheduler/execution behavior changes; no provider-specific logic in core registry.  
 Dependencies: T-001.
 
 ### T-003 — Add immutable SQLite v14 provider-observation schema
-**Status:** TODO. **Priority:** P0.  
+**Status:** READY. **Priority:** P0.  
 Add `provider_accounts`, `provider_models`, `provider_capacity_snapshots`, `provider_quota_windows`, `provider_sessions`; bump SchemaVersion only by appending v14. Tests: fresh DB, v13->v14 upgrade, FK/integrity, immutable prior checksum contract. Dependencies: T-001.
 
 ### T-004 — Add provider observation store contracts
@@ -366,6 +367,7 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 ## 19. Completed Tasks
 
 - **T-001:** DONE on `main`, commit `bf060a70833504fc5dc979181d59453276a56e0c`; full Harness CI passed.
+- **T-002:** DONE in this verified iteration; observation adapter/registry contracts and concurrency tests passed full Linux/Windows Harness CI.
 
 ## 20. Iteration Log
 
@@ -383,9 +385,9 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 **Findings:** F-002 boundary foundation; unexpected F-013.  
 **Changes:** observation-only `CapacitySource`/`ModelSource`/`SessionSource`, composite account `Adapter`, concurrency-safe deterministic live `Registry`, contract/race tests.  
 **Plan changes:** unified execution contract deferred to T-013/T-014 because TaskEnvelope is required to avoid coupling AGY/process and `ModelClient` semantics.  
-**Verification:** full Harness CI in progress on validation branch.  
-**Commit/Push:** pending verified fast-forward to main.  
-**Result:** VERIFYING.
+**Verification:** Linux/Windows Harness CI PASS: module tidy, bridge contracts, unit/integration, race, vet and configured smoke benchmarks.  
+**Commit/Push:** this verified iteration is to be published as one fast-forward commit on `main`, no force.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
