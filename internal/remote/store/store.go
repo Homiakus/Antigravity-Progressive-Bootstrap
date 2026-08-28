@@ -42,9 +42,36 @@ type SessionStore interface {
 	ListSessionsByInstance(context.Context, model.InstanceID, bool) ([]model.RemoteSession, error)
 }
 
+type TelegramStore interface {
+	GetTelegramCursor(context.Context, string) (model.TelegramCursor, error)
+	AdvanceTelegramCursor(context.Context, model.TelegramCursor) error
+	UpsertTelegramPrincipal(context.Context, model.TelegramPrincipal) error
+	GetTelegramPrincipal(context.Context, int64) (model.TelegramPrincipal, error)
+	CreateTelegramPairing(context.Context, model.TelegramPairing) error
+	ConsumeTelegramPairing(context.Context, string, int64, int64, time.Time) (model.TelegramPrincipal, error)
+	ReserveTelegramCallback(context.Context, string, int64, int64, time.Time) (bool, error)
+	UpsertTelegramBinding(context.Context, model.TelegramBinding) error
+	GetTelegramBindingByTopic(context.Context, int64, int64) (model.TelegramBinding, error)
+}
+
+type RemoteCommandStore interface {
+	AdmitRemoteCommand(context.Context, model.RemoteCommand) (model.RemoteCommand, bool, error)
+	GetRemoteCommand(context.Context, model.RemoteCommandID) (model.RemoteCommand, error)
+	ListPendingRemoteCommands(context.Context, int) ([]model.RemoteCommand, error)
+	UpdateRemoteCommandState(context.Context, model.RemoteCommandID, model.CommandState, string, time.Time) error
+}
+
+type RemoteEventStore interface {
+	AppendRemoteEvent(context.Context, model.RemoteEvent) (model.RemoteEvent, bool, error)
+	ListRemoteEventsAfter(context.Context, model.RemoteSessionID, uint64, int) ([]model.RemoteEvent, error)
+}
+
 type Store interface {
 	RepositoryStore
 	InstanceStore
 	ConversationStore
 	SessionStore
+	TelegramStore
+	RemoteCommandStore
+	RemoteEventStore
 }
