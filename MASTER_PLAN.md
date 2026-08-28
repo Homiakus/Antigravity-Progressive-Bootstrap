@@ -16,17 +16,18 @@ Target loop:
 
 The durable harness remains the foundation: adaptive DAG replanning, SQLite/WAL durability, fair READY scheduling, physical resource feasibility, worker registry, fenced attempt leases, effect intents, `IN_DOUBT`, retries, waits, approvals, artifacts/workspaces, AGY/Antigravity execution, generic agent executor, workflow budgets and Linux/Windows CI already exist.
 
-Provider-control-plane foundation completed/verified through T-009:
+Provider-control-plane foundation completed/verified through T-009, with T-005 v15 runtime persistence now verified for publication:
 
 - T-001 provider-domain primitives: `bf060a70833504fc5dc979181d59453276a56e0c`.
 - T-002 observation adapter/registry: `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 SQLite v14 provider-observation schema: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 durable provider observation Store/SQLite implementation: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
+- T-005 SQLite v15 provider runtime ledger: implementation `be8a786de320b6e017a8da7eb8d74e5f3a119695`; reconciled against current R18 main on `7fa9578795a7cf5029e80f618c9b87c3524063a2`; publication pending.
 - T-006 Antigravity observation adapter: `a46eb75f947f97f62a06129e3469fe18466d6843`.
 - T-007 Codex App Server observation adapter: `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 - T-009 provider-neutral capacity normalization/effective headroom: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.
 
-Next highest-leverage work: T-005 SQLite v15 assignment/reservation/usage/circuit persistence. T-010 then becomes unblocked by T-005 + T-009.
+Next highest-leverage dependency-chain work after T-005 publication: T-010 conservative demand estimator. T-008 session/context broker remains READY and is required before T-012.
 
 ## 3. Architecture Map
 
@@ -58,6 +59,8 @@ coherent Observation               rate-limit baseline + sparse deltas
                    |
        durable provider observations
                    |
+      assignment + reservation ledger
+                   |
           capacity reservation
                    |
          worker + fenced lease
@@ -66,7 +69,7 @@ coherent Observation               rate-limit baseline + sparse deltas
                    |
                 execute
                    |
-         usage/effects/findings
+        idempotent usage/effects
                    |
     verify -> review -> reconcile
                    |
@@ -81,13 +84,15 @@ Orthogonal concepts MUST stay separate: `Worker`, `ProviderAccount`, `ProviderMo
 
 Harness CI enforces module tidiness, bridge syntax/contracts, `go test ./...`, `go test -race ./...`, `go vet ./...`, compiler/store/scheduler/retry/wait smoke benchmarks and Windows tests.
 
-Persistence is SQLite schema v14. Migrations 1..13 are immutable checksummed releases; v14 is append-only provider observation schema.
+Persistence is SQLite schema v15. Migrations 1..14 are immutable checksummed releases; v15 is the append-only provider runtime ledger and does not modify released v14 provider-observation SQL.
 
-T-009 verification:
+T-005 verification:
 
-- implementation head `b66d68c18edb3e138dc1acf988d7315fb252871f`: full Linux/Windows Harness CI PASS;
-- reconciled head `3e24d94f822fe5b8d73c8f6a61282bb65334e8f3`: full Linux/Windows Harness CI PASS;
-- published atomic tree: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`, fast-forward to `main`, no force.
+- implementation head `be8a786de320b6e017a8da7eb8d74e5f3a119695`: full Linux/Windows Harness CI PASS;
+- `main` moved during validation to R18 commit `265d947eda0470dd56f775b523277a932276646d`; changed files were remote daemon/session/command only and did not overlap T-005;
+- T-005 blobs were overlaid on the current main tree rather than merging the obsolete branch history;
+- reconciled head `7fa9578795a7cf5029e80f618c9b87c3524063a2`: full Linux/Windows Harness CI PASS;
+- publication remains fast-forward-only and requires a final current-main recheck after this plan reconciliation passes CI.
 
 ## 5. System Invariants
 
@@ -113,6 +118,11 @@ T-009 verification:
 - **I-020 Unit-preserving headroom:** TOKENS, REQUESTS, COST, FRACTION and OPAQUE remain distinct. Unlike or potentially overlapping quota windows are never summed or converted merely to obtain one convenient number.
 - **I-021 Exhaustion proof separation:** freshness/confidence penalties may reduce effective headroom to zero, but only authoritative provider health/evidence may establish `EXHAUSTED`.
 - **I-022 Reset-boundary invalidation:** an observation captured before a quota reset cannot be reused as current capacity after that reset boundary; it becomes expired until refreshed.
+- **I-023 Durable routing history:** provider handoff appends a new assignment only after the previous assignment becomes terminal/superseded; historical account/model decisions are never rewritten. At most one assignment per Attempt is ACTIVE at a time.
+- **I-024 Reservation lifecycle fencing:** reservations begin ACTIVE at revision 1 and reach terminal states only by CAS. An assignment cannot become terminal while any reservation row attached to it remains ACTIVE.
+- **I-025 Complete reservation accounting:** capacity feasibility must use the complete untruncated set of non-expired ACTIVE reservations (or an equivalent SQL aggregate). Paged diagnostic reads are never correctness inputs.
+- **I-026 Usage replay idempotency:** one provider usage event key produces one immutable semantic sample; equivalent redelivery is a no-op, while the same key with changed semantic data fails closed.
+- **I-027 Runtime quantity bounds:** OPAQUE capacity is observable but never reservable/measurable arithmetically; FRACTION reservation/usage values stay within their defined fractional range.
 
 ## 6. Findings Registry
 
@@ -129,8 +139,8 @@ T-007 makes Codex a first-class observation source; portable execution still wai
 Existing budget tracker is permission-to-spend, not provider supply. Affects T-010,T-011.
 
 ### F-004 — No durable quota reservation ledger
-**Status:** Planned. **Severity:** Critical. **Confidence:** Confirmed.  
-Parallel dispatchers can oversubscribe the same headroom. Affects T-005,T-011.
+**Status:** Partially resolved in T-005. **Severity:** Critical. **Confidence:** Confirmed.  
+T-005 adds durable typed assignments/reservations, revision fencing, expiry metadata and a complete ACTIVE-claim read. The critical oversubscription risk is not closed until T-011 atomically performs capacity read + complete active-reservation accounting + feasibility + assignment/reservation commit in one write transaction.
 
 ### F-005 — Existing worker/lease subsystem must be reused
 **Status:** Resolved by architecture. **Severity:** High.  
@@ -154,19 +164,20 @@ Affects T-018,T-019.
 **Status:** Planned. **Severity:** Medium. Affects T-008,T-013.
 
 ### F-011 — Provider routing decisions are not durable/explainable
-**Status:** Planned. **Severity:** Medium. Affects T-012,T-020,T-021.
+**Status:** Partially resolved in T-005. **Severity:** Medium.  
+Historical assignment/account/model/session bindings are now durable and handoff-safe. Selector scoring/rationale and human-readable route explanation remain T-012/T-020/T-021.
 
 ### F-012 — Released SQLite migrations are immutable
 **Status:** Resolved. **Severity:** High.  
-T-003 appended v14 without modifying v1..v13.
+T-003 appended v14 without modifying v1..v13; T-005 appends v15 without modifying v1..v14.
 
 ### F-013 — Unified provider execution interface is premature before TaskEnvelope
 **Status:** Planned. **Severity:** Medium.  
 Portable execution remains deferred to T-013/T-014.
 
 ### F-014 — Concurrent autonomous work can move `main` during an iteration
-**Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
-Every publication must re-read `main`, reconcile semantics and fast-forward only. Affects T-018/T-019.
+**Status:** Planned. **Severity:** High. **Confidence:** Confirmed again in T-005.  
+T-005 observed `main` move to R18 commit `265d947eda0470dd56f775b523277a932276646d`. The validation tree was not published directly; its scoped blobs were overlaid on current main and fully revalidated. Every publication must re-read `main`, reconcile semantics and fast-forward only. Affects T-018/T-019.
 
 ### F-015 — Delayed provider observations can regress durable state
 **Status:** Resolved in T-004. **Severity:** High. **Confidence:** Confirmed.  
@@ -200,33 +211,53 @@ TOKENS/REQUESTS/COST may provide a trustworthy `remaining` count with no limit. 
 **Status:** Resolved in T-009. **Severity:** High. **Confidence:** Confirmed.  
 A timestamp can be recent while belonging to the previous quota period. T-009 expires any window observed before its `resetAt` once the reset passes; observations captured at/after the reset remain valid under normal freshness policy.
 
+### F-023 — Paged ACTIVE-reservation reads can undercount capacity claims
+**Status:** Resolved in T-005. **Severity:** Critical. **Confidence:** Confirmed.  
+A caller-supplied diagnostic limit can truncate claims and make later feasibility arithmetic unsafe. T-005 therefore provides `ListAllActiveProviderReservations` as the unbounded correctness read; T-011 must use it or an equivalent complete SQL aggregate inside its atomic transaction.
+
+### F-024 — Mutating one assignment record would destroy provider-handoff history
+**Status:** Resolved in T-005. **Severity:** High. **Confidence:** Confirmed.  
+T-005 stores assignment history as multiple immutable-identity records with a partial unique constraint allowing only one ACTIVE assignment per Attempt. A superseded assignment remains durable before a replacement becomes ACTIVE.
+
+### F-025 — Provider usage redelivery can double-count settlement
+**Status:** Resolved in T-005. **Severity:** High. **Confidence:** Confirmed.  
+Usage samples are keyed by provider/event idempotency key. Concurrent equivalent redelivery creates exactly one row and returns the same semantic record; reusing a key with changed assignment/reservation/account/model/metric/amount/observation time fails with conflict.
+
+### F-026 — Runtime FRACTION quantities need explicit bounds
+**Status:** Resolved in T-005. **Severity:** High. **Confidence:** Confirmed.  
+Reservation amounts are finite and positive, usage amounts finite and non-negative, and FRACTION is bounded to its fractional range in both domain validation and v15 SQL CHECK constraints. OPAQUE is deliberately excluded from reservation/usage arithmetic.
+
 ## 7. Risk Register
 
 | Risk | Level | Mitigation |
 |---|---|---|
-| quota oversubscription | Critical | atomic reservation + expiry + settlement |
+| quota oversubscription | Critical | T-005 durable claims + T-011 atomic capacity/claim transaction |
+| truncated active-claim accounting | Critical | I-025; unbounded correctness read / complete SQL aggregate |
 | duplicate side effects | Critical | effect intents + `IN_DOUBT` |
+| duplicate usage settlement | High | semantic idempotency key + conflicting replay rejection |
 | simultaneous main writes | Critical | fenced Commit Coordinator |
-| moved remote main | High | pre-push ref recheck + fast-forward only |
+| moved remote main | High | pre-push ref recheck + scoped reconcile + fast-forward only |
+| stale reservation/assignment mutation | High | revision CAS + terminal transition rules |
+| provider handoff history loss | High | append/supersede assignment history; one ACTIVE per Attempt |
 | stale observations | High | monotonic timestamps + freshness/expiry policy |
 | pre-reset capacity reused after reset | High | reset-aware expiry (I-022) |
 | torn provider observation | High | coherent `SnapshotSource`/single upstream payload |
 | sparse delta erases known state | High | merge only available Codex values; baseline on reconnect |
 | partial model catalog | High | replace only after complete pagination cycle |
 | false thread->model affinity | High | I-018; no inferred ProviderSessionSnapshot |
-| incompatible quota units combined | High | I-020; separate metric/window headroom |
+| incompatible quota units combined | High | I-020/I-027; separate metric/window headroom |
 | decay-to-zero mistaken for exhaustion | High | I-021; authoritative exhaustion proof only |
-| malformed floating telemetry | High | finite/consistency checks at T-009 boundary |
+| malformed floating telemetry | High | finite/consistency checks at normalization/runtime boundaries |
 | stale plan execution | High | plan revision/digest gate |
 | provider API drift | High | tolerant adapters + deterministic fixtures + dynamic discovery |
-| opaque quota semantics | High | native IDs/FRACTION/OPAQUE; no inferred mapping |
+| opaque quota semantics | High | native IDs/FRACTION/OPAQUE; OPAQUE is never reserved |
 | session context exhaustion | High | broker + checkpoint/new-session policy |
-| provider flapping | Medium | hysteresis + switch penalty + circuit breaker |
+| provider flapping | Medium | hysteresis + switch penalty + provider circuit CAS |
 | poor demand estimate | Medium | conservative p80 + settlement feedback |
 
 ## 8. Pareto Improvements
 
-Remaining high-leverage path: v15 assignment/reservation/usage persistence -> conservative estimator -> atomic reservation service -> shadow selector -> TaskEnvelope/plan digest -> safe read-only routing -> provider-aware failover -> isolated writes -> Commit Coordinator.
+Remaining high-leverage path: conservative estimator -> atomic reservation service -> shadow selector -> TaskEnvelope/plan digest -> safe read-only routing -> provider-aware failover -> isolated writes -> Commit Coordinator.
 
 ## 9. Dependency DAG
 
@@ -234,10 +265,10 @@ Remaining high-leverage path: v15 assignment/reservation/usage persistence -> co
 T001 DONE -> T002 DONE -> T003 DONE -> T004 DONE
                                       |-> T006 Antigravity observation DONE
                                       |-> T007 Codex observation DONE
-                                      |-> T005 v15 assignment/reservation persistence READY
+                                      |-> T005 v15 assignment/reservation persistence DONE
 T004,T006,T007 -> T008 session broker READY
 T004,T006,T007 -> T009 capacity normalization DONE
-T005,T009 -> T010 estimator -> T011 reservations -> T012 shadow selector
+T005,T009 -> T010 estimator READY -> T011 reservations -> T012 shadow selector
 T012 -> T013 TaskEnvelope + digest -> T014 auto read-only -> T015 provider failures
 T013,T015 -> T016 safe handoff -> T017 isolated writes -> T018 Commit Coordinator -> T019 single-main-writer enforcement
 T012 -> T020 explain route
@@ -249,8 +280,8 @@ T014..T023 -> T024 rollout -> T025 legacy deletion -> T026 final re-audit
 
 ## 10. Implementation Phases
 
-- **A Domain/persistence:** T-001..T-005.
-- **B Observe/normalize:** T-006..T-009.
+- **A Domain/persistence:** T-001..T-005 complete after T-005 publication.
+- **B Observe/normalize:** T-006..T-009 complete except independent T-008 session broker.
 - **C Predict/shadow:** T-010..T-012.
 - **D Portable execution:** T-013..T-016.
 - **E Multi-provider writes:** T-017..T-019.
@@ -271,8 +302,15 @@ T014..T023 -> T024 rollout -> T025 legacy deletion -> T026 final re-audit
 Account/model/session upsert/read/list, atomic capacity snapshot+window append, deterministic latest reconstruction, identity checks, monotonic stale-update rejection and WAL concurrent readers. Commit `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 
 ### T-005 — Persist assignments/reservations/usage/circuit state in SQLite v15
-**Status:** READY / NEXT. **Priority:** P0. **Leverage:** HIGH.  
-Add `provider_assignments`, `provider_reservations`, `provider_usage_samples`, `provider_circuit_state`. Reservation states ACTIVE/SETTLED/RELEASED/EXPIRED. Tests: FK/CHECK, idempotent settlement foundations, CAS/concurrency. Dependencies: T-004.
+**Status:** DONE / VERIFIED, publication pending. **Priority:** P0. **Leverage:** HIGH.  
+Schema: append-only v15 `provider_runtime_ledger` adds `provider_assignments`, `provider_reservations`, `provider_usage_samples`, `provider_circuit_state`; released v1..v14 remain immutable. Assignment/account and reservation/assignment composite FKs preserve durable identity without requiring transient provider-model catalog ordering. Partial unique indexes enforce one ACTIVE assignment per Attempt and one ACTIVE reservation per assignment/window/model/metric dimension.  
+Assignments: historical account/model decisions are immutable in identity, optional session binding is one-way, state/revision changes use CAS, terminal assignments cannot strand ACTIVE reservations, and safe handoff can supersede one assignment then append another without erasing history.  
+Reservations: native TOKENS/REQUESTS/COST/FRACTION amounts only; OPAQUE is not reservable; FRACTION is bounded; ACTIVE starts at revision 1 and transitions to SETTLED/RELEASED/EXPIRED through CAS; `expires_at_ns` supports deterministic due scans. Diagnostic active reads may be paged, while `ListAllActiveProviderReservations` is deliberately unbounded for correctness-sensitive feasibility.  
+Usage: immutable provider/event-keyed samples with assignment/account/model/metric and optional reservation linkage; equivalent sequential or concurrent redelivery is idempotent even if local ingestion `CreatedAt` differs; changed semantic payload under the same key conflicts.  
+Circuit: account/model-scoped CLOSED/OPEN/HALF_OPEN state with monotonic revision CAS, separate from the existing generic service circuit breaker.  
+Concurrency authority: the existing SQLite single-writer pool serializes in-process writers while SQL FK/CHECK/partial-UNIQUE/CAS/UPSERT invariants provide correctness; T-005 does not introduce a parallel lock subsystem.  
+Tests: v14->v15 migration, table/index existence, FK/CHECK and FRACTION bounds, one-ACTIVE constraints, Store round-trip, stale CAS, assignment/reservation lifecycle, terminalization guard, handoff history, complete-vs-paged active set, provider circuit fencing, 32-way concurrent assignment claim, 32-way reservation CAS and 32-way concurrent usage replay exactly-once semantics.  
+Verification: implementation head `be8a786de320b6e017a8da7eb8d74e5f3a119695` full Linux/Windows Harness CI PASS; reconciled head `7fa9578795a7cf5029e80f618c9b87c3524063a2` full Linux/Windows Harness CI PASS after overlay on current R18 main. Dependencies: T-004.
 
 ### T-006 — Implement Antigravity observation adapter
 **Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
@@ -301,12 +339,12 @@ Commit: `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.
 Push: `main`, fast-forward, no force. Dependencies: T-004,T-006,T-007.
 
 ### T-010 — Add conservative demand estimator
-**Status:** BLOCKED ON T-005. **Priority:** P1.  
-Robust historical p50/p80 by task/provider/model/repository/context class; p80 reservation, no ML initially. Preserve demand units so native absolute headroom is compared only with compatible estimates. Dependencies: T-005,T-009.
+**Status:** READY. **Priority:** P1.  
+Robust historical p50/p80 by task/provider/model/repository/context class; p80 reservation, no ML initially. Preserve demand units so native absolute headroom is compared only with compatible estimates. Usage-sample idempotency from T-005 is the durable feedback foundation. Dependencies: T-005,T-009.
 
 ### T-011 — Implement atomic provider reservations
 **Status:** TODO. **Priority:** P0.  
-Single transaction: latest capacity + active reservations -> feasibility -> reservation + assignment. Expiry/release/settlement and 100+ concurrent reserver proof. Reservation arithmetic must respect I-020 native units and I-021 exhaustion-proof separation. Dependencies: T-005,T-009,T-010.
+Single write transaction: latest capacity + complete non-expired ACTIVE reservations -> normalization/compatible-unit feasibility -> assignment + reservation. Expiry/release/settlement and 100+ concurrent reserver proof. Must use I-025 complete accounting, respect I-020/I-027 units and preserve I-021 exhaustion-proof separation. Dependencies: T-005,T-009,T-010.
 
 ### T-012 — Add explainable shadow selector
 **Status:** TODO. **Priority:** P0.  
@@ -352,7 +390,7 @@ Provider x account x model x quota metric/window x freshness/reset x reservation
 
 ### T-023 — Add mutation testing for critical provider policy
 **Status:** TODO. **Priority:** P1.  
-Mutate quota boundaries, unit compatibility, freshness/reset expiry, reservation subtraction, stale-plan gate, replay branch, circuit transitions, settlement idempotency and commit fencing.
+Mutate quota boundaries, unit compatibility, freshness/reset gates, complete active-claim accounting, reservation subtraction, stale-plan gate, replay branch, circuit transitions, settlement idempotency and commit fencing.
 
 ### T-024 — Progressive rollout
 **Status:** TODO. **Priority:** P1.  
@@ -372,23 +410,25 @@ Observation adapters additionally require unknown-field tolerance, known-field b
 
 Capacity normalizers additionally require unit preservation, finite-number checks, fraction/absolute consistency, no inferred denominators, confidence/freshness monotonicity, reset-boundary expiry, zero-vs-exhaustion separation, deterministic bottlenecks and provider-adapter equivalence tests.
 
+Provider runtime persistence additionally requires immutable migration checksums, FK/CHECK/partial-UNIQUE proof, revision-CAS contention, one-ACTIVE assignment/reservation constraints, handoff-history preservation, explicit reservation terminalization, complete active-claim reads and sequential/concurrent idempotent usage redelivery.
+
 ## 13. Mutation Testing Strategy
 
-Mandatory once executable routing policy exists: quota `<`/`<=`, metric-unit compatibility, freshness/reset gates, reservation subtraction, stale-plan bypass, replay branch inversion, `IN_DOUBT` bypass, circuit transitions, settlement idempotency and commit-fencing. Mutation becomes mandatory starting with T-011 policy logic.
+Mandatory once executable routing policy exists: quota `<`/`<=`, metric-unit compatibility, freshness/reset gates, complete-claim accounting, reservation subtraction, stale-plan bypass, replay branch inversion, `IN_DOUBT` bypass, circuit transitions, settlement idempotency and commit-fencing. Mutation becomes mandatory starting with T-011 policy logic.
 
 ## 14. Performance Baselines
 
-Do not materially regress current harness benchmarks. T-009 includes a 100-window allocation benchmark for the normalizer. Add later: latest capacity with 10k snapshots; 10k reservation aggregate; selector over 1k READY x 8 candidates; 100 concurrent reservations; route explanation without N+1 queries.
+Do not materially regress current harness benchmarks. T-009 includes a 100-window allocation benchmark for the normalizer. Add later: latest capacity with 10k snapshots; complete/aggregate active claims with 10k reservations; selector over 1k READY x 8 candidates; 100 concurrent reservations; route explanation without N+1 queries.
 
 ## 15. Security Hardening
 
-Credentials never enter plan/telemetry. Adapters expose normalized health/capabilities, not secrets. Provider input is validated/bounded. Derived routing arithmetic rejects non-finite or internally contradictory telemetry. Ingestion payloads are size-capped. Status-line email/transcript/path data is discarded or one-way fingerprinted where affinity is required. JSON-RPC error/auth payloads are classified but not copied into durable provider state. Logs redact auth/session tokens. Remote-worker trust does not imply credential access. Only Commit Coordinator may autonomously write `main` in final architecture.
+Credentials never enter plan/telemetry. Adapters expose normalized health/capabilities, not secrets. Provider input is validated/bounded. Derived routing arithmetic rejects non-finite or internally contradictory telemetry. Runtime reservation/usage quantities reject non-finite values and OPAQUE arithmetic; fractional values are bounded. Ingestion payloads are size-capped. Status-line email/transcript/path data is discarded or one-way fingerprinted where affinity is required. JSON-RPC error/auth payloads are classified but not copied into durable provider state. Logs redact auth/session tokens. Remote-worker trust does not imply credential access. Only Commit Coordinator may autonomously write `main` in final architecture.
 
 ## 16. Migration Strategy
 
 `provider domain -> observation persistence -> Antigravity/Codex live adapters -> normalization -> reservation persistence -> estimator -> shadow -> TaskEnvelope -> read-only -> safe handoff -> isolated writes -> Commit Coordinator -> single-writer enforcement -> default -> legacy deletion`.
 
-Every intermediate state must keep `main` buildable and compatible.
+Every intermediate state must keep `main` buildable and compatible. Released SQLite migrations remain immutable; new runtime persistence is additive v15.
 
 ## 17. Deferred Work
 
@@ -413,6 +453,11 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - **R-015 sum/convert unlike quota metrics:** rejected after T-009/F-021; preserve native units and only compare justified fractions.
 - **R-016 effective headroom zero == provider exhausted:** rejected after T-009/I-021; decay/uncertainty is not exhaustion proof.
 - **R-017 retain pre-reset observation after reset:** rejected after T-009/F-022; reset crossing expires the previous quota-period evidence.
+- **R-018 use a paged reservation list for feasibility:** rejected after F-023; capacity arithmetic requires the complete active set or equivalent aggregate.
+- **R-019 rewrite one assignment row during provider handoff:** rejected after F-024; supersede/terminalize then append a new historical assignment.
+- **R-020 reserve OPAQUE or accept FRACTION > 1:** rejected after F-026; only compatible measurable native units participate in arithmetic.
+- **R-021 duplicate usage rows on event redelivery:** rejected after F-025; usage persistence is semantic-key idempotent under races.
+- **R-022 rely on a driver-specific SQLite `_txlock` option for correctness:** rejected; the durable harness uses a single writer connection plus SQL CAS/constraints and WAL readers.
 
 ## 19. Completed Tasks
 
@@ -420,6 +465,7 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - T-002 DONE — `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 DONE — `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 - T-004 DONE — `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
+- T-005 DONE/VERIFIED — implementation `be8a786de320b6e017a8da7eb8d74e5f3a119695`; reconciled `7fa9578795a7cf5029e80f618c9b87c3524063a2`; publication commit recorded after fast-forward.
 - T-006 DONE — `a46eb75f947f97f62a06129e3469fe18466d6843`.
 - T-007 DONE — `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 - T-009 DONE — `47c08fc118513d8b9ddb7cb5fdd6523dd32fd52b`.
@@ -463,6 +509,16 @@ Antigravity bounded/tolerant observation adapter, coherent snapshot source, priv
 **Push:** `main`, fast-forward, no force.  
 **Result:** PASS.
 
+### Iteration 8 — T-005
+**Findings addressed:** F-004 durable reservation foundation; F-011 durable routing history; F-023 complete active-claim accounting; F-024 handoff history; F-025 usage replay; F-026 runtime quantity bounds.  
+**Unexpected findings:** a paged ACTIVE-reservation API is unsafe as a correctness input; provider handoff requires append/supersede history rather than mutation; concurrent usage redelivery needs semantic idempotency; `main` moved to R18 while T-005 was validating.  
+**Changes:** SQLite v15 runtime ledger; provider assignment/reservation/usage/circuit domain models; FK/CHECK/partial-UNIQUE schema; revision CAS; terminalization guard; unbounded correctness active-reservation read; immutable/idempotent usage samples; provider-scoped circuit fencing.  
+**Tests:** v14->v15 migration, FK/CHECK/FRACTION bounds, assignment and reservation uniqueness, lifecycle/CAS, history handoff, complete claim reads, circuit state, 32-way assignment claims, 32-way reservation CAS, sequential and 32-way concurrent usage replay.  
+**Verification:** full Linux/Windows Harness CI PASS on implementation head `be8a786de320b6e017a8da7eb8d74e5f3a119695`; stale validation history was not merged after `main` moved; scoped T-005 blobs were overlaid on R18 main and reconciled head `7fa9578795a7cf5029e80f618c9b87c3524063a2` also passed full Linux/Windows Harness CI.  
+**Plan changes:** I-023..I-027; F-004/F-011 partially resolved; F-023..F-026 resolved; T-005 DONE/VERIFIED; T-010 READY; T-011 explicitly requires complete active-claim accounting.  
+**Commit/Push:** atomic fast-forward publication is the current final action after this reconciled plan passes CI; no force.  
+**Result:** PASS pending publication checkpoint.
+
 ## 21. Definition of Final Done
 
-No open Critical/High routing findings; Antigravity and Codex are first-class observation/execution providers; no guessed quota semantics, denominator, unit conversion or session/model attribution; coherent provider observations cannot tear across revisions; stale/pre-reset capacity cannot masquerade as current supply; reservations cannot oversubscribe under races; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe interruption reaches existing `IN_DOUBT`; read-only and isolated-write rollout gates pass; only fenced Commit Coordinator writes main autonomously; no force push; CI/race/vet/mutation/benchmarks pass; routing is explainable; legacy duplicates removed; final re-audit finds no fundamental Critical/High issue; final verified tree and synchronized plan are on `main`.
+No open Critical/High routing findings; Antigravity and Codex are first-class observation/execution providers; no guessed quota semantics, denominator, unit conversion or session/model attribution; coherent provider observations cannot tear across revisions; stale/pre-reset capacity cannot masquerade as current supply; durable routing history survives provider handoff; usage redelivery is idempotent; reservation arithmetic accounts for the complete active claim set; reservations cannot oversubscribe under races; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe interruption reaches existing `IN_DOUBT`; read-only and isolated-write rollout gates pass; only fenced Commit Coordinator writes main autonomously; no force push; CI/race/vet/mutation/benchmarks pass; routing is explainable; legacy duplicates removed; final re-audit finds no fundamental Critical/High issue; final verified tree and synchronized plan are on `main`.
