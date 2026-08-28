@@ -13,7 +13,7 @@ import (
 	remotesqlite "github.com/homiakus/agctl/internal/remote/store/sqlite"
 )
 
-const remoteUsage = "usage: agctl remote status | repo add [--name NAME] PATH | repo list [--all] | repo enable --id ID | repo disable --id ID"
+const remoteUsage = "usage: agctl remote status | daemon [OPTIONS] | telegram pair|bind ... | repo add [--name NAME] PATH | repo list [--all] | repo enable --id ID | repo disable --id ID"
 
 // init is a temporary strangler entrypoint for the remote-control line. It
 // mirrors the durable Harness entrypoint and keeps the legacy main switch
@@ -37,16 +37,16 @@ func init() {
 }
 
 type remoteStatus struct {
-	DatabasePath       string `json:"databasePath"`
-	SchemaVersion      int    `json:"schemaVersion"`
-	Repositories       int    `json:"repositories"`
-	EnabledRepositories int   `json:"enabledRepositories"`
-	Instances          int    `json:"instances"`
-	Conversations      int    `json:"conversations"`
-	Sessions           int    `json:"sessions"`
-	TelegramBindings   int    `json:"telegramBindings"`
-	PendingCommands    int    `json:"pendingCommands"`
-	PendingOutbox      int    `json:"pendingOutbox"`
+	DatabasePath        string `json:"databasePath"`
+	SchemaVersion       int    `json:"schemaVersion"`
+	Repositories        int    `json:"repositories"`
+	EnabledRepositories int    `json:"enabledRepositories"`
+	Instances           int    `json:"instances"`
+	Conversations       int    `json:"conversations"`
+	Sessions            int    `json:"sessions"`
+	TelegramBindings    int    `json:"telegramBindings"`
+	PendingCommands     int    `json:"pendingCommands"`
+	PendingOutbox       int    `json:"pendingOutbox"`
 }
 
 func runRemote(p paths.Paths, args []string) error {
@@ -59,6 +59,10 @@ func runRemote(p paths.Paths, args []string) error {
 			return fmt.Errorf(remoteUsage)
 		}
 		return runRemoteStatus(p)
+	case "daemon":
+		return runRemoteDaemon(p, args[1:])
+	case "telegram":
+		return runRemoteTelegram(p, args[1:])
 	case "repo":
 		return runRemoteRepo(p, args[1:])
 	default:
