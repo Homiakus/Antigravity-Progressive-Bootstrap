@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestVersionThirteenToFourteenCreatesProviderObservationSchema(t *testing.T) {
+func TestUpgradeFromVersionThirteenIncludesProviderObservationSchema(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "state.db")
 	openFixtureAtVersion(t, path, 13)
@@ -20,8 +20,8 @@ func TestVersionThirteenToFourteenCreatesProviderObservationSchema(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 14 {
-		t.Fatalf("schema version=%d want=14", version)
+	if version != SchemaVersion {
+		t.Fatalf("schema version=%d want=%d", version, SchemaVersion)
 	}
 	for _, table := range []string{
 		"provider_accounts",
@@ -32,7 +32,7 @@ func TestVersionThirteenToFourteenCreatesProviderObservationSchema(t *testing.T)
 	} {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&got); err != nil {
-			t.Fatalf("missing v14 table %s: %v", table, err)
+			t.Fatalf("missing v14 table %s after upgrade: %v", table, err)
 		}
 	}
 	for _, index := range []string{
@@ -45,7 +45,7 @@ func TestVersionThirteenToFourteenCreatesProviderObservationSchema(t *testing.T)
 	} {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='index' AND name=?`, index).Scan(&got); err != nil {
-			t.Fatalf("missing v14 index %s: %v", index, err)
+			t.Fatalf("missing v14 index %s after upgrade: %v", index, err)
 		}
 	}
 }
