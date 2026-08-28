@@ -69,7 +69,7 @@ VALUES('pasn_duplicate',?,?, 'gpt-test','ACTIVE',1,?,?)`, string(testProviderAtt
 		t.Fatal("second ACTIVE assignment for one attempt unexpectedly accepted")
 	}
 
-	for name, metric, amount := range []struct {
+	for _, tc := range []struct {
 		name   string
 		metric string
 		amount float64
@@ -77,14 +77,15 @@ VALUES('pasn_duplicate',?,?, 'gpt-test','ACTIVE',1,?,?)`, string(testProviderAtt
 		{name: "opaque", metric: "OPAQUE", amount: 1},
 		{name: "zero", metric: "TOKENS", amount: 0},
 		{name: "negative", metric: "TOKENS", amount: -1},
+		{name: "fraction-over-one", metric: "FRACTION", amount: 1.01},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if _, err := db.SQLDB().ExecContext(ctx, `
 INSERT INTO provider_reservations(
  id, assignment_id, account_id, window_id, metric, amount, state, revision, created_at, expires_at, expires_at_ns, updated_at
-) VALUES(?,?,?,?,?,?,'ACTIVE',1,?,?,?,?)`, "pres_bad_"+name, string(assignment.ID), string(testProviderAccountID), "primary", metric, amount,
+) VALUES(?,?,?,?,?,?,'ACTIVE',1,?,?,?,?)`, "pres_bad_"+tc.name, string(assignment.ID), string(testProviderAccountID), "primary", tc.metric, tc.amount,
 				formatTime(now), formatTime(now.Add(time.Minute)), now.Add(time.Minute).UnixNano(), formatTime(now)); err == nil {
-				t.Fatalf("invalid reservation metric=%s amount=%v unexpectedly accepted", metric, amount)
+				t.Fatalf("invalid reservation metric=%s amount=%v unexpectedly accepted", tc.metric, tc.amount)
 			}
 		})
 	}
