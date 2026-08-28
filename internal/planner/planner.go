@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/homiakus/agctl/internal/capability"
+	"github.com/homiakus/agctl/internal/engineering"
 	"github.com/homiakus/agctl/internal/jsonx"
 	"github.com/homiakus/agctl/internal/model"
 	"github.com/homiakus/agctl/internal/paths"
@@ -285,6 +286,7 @@ func Enqueue(p paths.Paths, plan model.ExecutionPlan, priority int, nativeGoal b
 		if len(n.Verification) > 0 {
 			prompt += "\n\nRequired verification:\n- " + strings.Join(n.Verification, "\n- ")
 		}
+		prompt = engineering.WrapWorkerTask(prompt, plan.ID, n.ID)
 		nodeWorkspace := plan.Workspace
 		if strings.TrimSpace(n.Workspace) != "" {
 			nodeWorkspace = n.Workspace
@@ -295,7 +297,7 @@ func Enqueue(p paths.Paths, plan model.ExecutionPlan, priority int, nativeGoal b
 			Priority:       priority,
 			NativeGoal:     nativeGoal,
 			Agent:          n.Agent,
-			Tags:           append([]string{"plan:" + plan.ID, "node:" + n.ID}, n.Tags...),
+			Tags:           append([]string{"plan:" + plan.ID, "node:" + n.ID, "engineering-role:worker"}, n.Tags...),
 			PlanID:         plan.ID,
 			NodeID:         n.ID,
 			Dependencies:   deps,
