@@ -1,6 +1,7 @@
 package loop
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,12 @@ import (
 	"github.com/homiakus/agctl/internal/engineering"
 	"github.com/homiakus/agctl/internal/model"
 	"github.com/homiakus/agctl/internal/paths"
+)
+
+const (
+	loopBaseSHA = "1111111111111111111111111111111111111111"
+	loopHeadSHA = "2222222222222222222222222222222222222222"
+	loopTreeSHA = "3333333333333333333333333333333333333333"
 )
 
 func testPaths(t *testing.T) paths.Paths {
@@ -125,8 +132,10 @@ func TestCompletionInjectionIncludesLivingPlanProtocol(t *testing.T) {
 		"SELECT exactly one T-XXX",
 		"Unexpected substantial problems",
 		"mutation",
-		"push-main",
-		"checkpoint",
+		"qualified-tree=",
+		"force=false",
+		"checkpoint:plan",
+		"independently observes local/remote main",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("completion injection missing %q", want)
@@ -134,19 +143,44 @@ func TestCompletionInjectionIncludesLivingPlanProtocol(t *testing.T) {
 	}
 }
 
-func TestManagedCompletionStoresPlanDigest(t *testing.T) {
-	p := testPaths(t)
-	workspace := t.TempDir()
-	chdir(t, workspace)
-	plan := "# MASTER PLAN\n\n### F-027 — process\n**Status:** Resolved.\n\n### T-027 — process\n**Status:** DONE.\n"
-	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(plan), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed", WorkspacePaths: []string{workspace}}, InitialNumSteps: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	evidence := []string{
+type fakePublicationVerifier struct {
+	snapshot  engineering.PublicationSnapshot
+	err       error
+	workspace string
+	proof     engineering.PublicationProof
+	calls     int
+}
+
+func (f *fakePublicationVerifier) Verify(workspace string, proof engineering.PublicationProof) (engineering.PublicationSnapshot, error) {
+	f.calls++
+	f.workspace = workspace
+	f.proof = proof
+	return f.snapshot, f.err
+}
+
+func managedLoopPlan(task string) string {
+	return `# MASTER PLAN
+
+### F-027 — process
+**Status:** Resolved.
+
+### T-027 — process
+**Status:** DONE.
+
+### Context Compression Checkpoint — after T-027
+
+` + "`CURRENT QUALIFIED MILESTONE:` machine publication proof.  \n" +
+		"`CRITICAL INVARIANTS:` I-028,I-030.  \n" +
+		"`COMPLETED THIS ITERATION:` " + task + ".  \n" +
+		"`NEXT TASK:` T-028.  \n" +
+		"`WHY NEXT:` role isolation.  \n" +
+		"`VERIFICATION COMMANDS:` go test ./....  \n" +
+		"`IMPORTANT DECISIONS:` validator is read-only.  \n" +
+		"`NEW PROCESS LEARNING:` publication claims need observation.\n"
+}
+
+func managedLoopEvidence() []string {
+	return []string{
 		"task:T-027",
 		"preflight:recorded",
 		"characterization:recorded",
@@ -162,17 +196,97 @@ func TestManagedCompletionStoresPlanDigest(t *testing.T) {
 		"self-review:passed",
 		"plan-reconcile:updated",
 		"process-review:updated",
-		"push-main:verified",
-		"checkpoint:recorded",
+		"push-main:branch=main;head=" + loopHeadSHA + ";remote=origin;remote-head=" + loopHeadSHA + ";base=" + loopBaseSHA + ";qualified-tree=" + loopTreeSHA + ";force=false",
+		"checkpoint:plan",
 	}
-	if err := MarkComplete(p, "managed", st.TaskID, "done", evidence); err != nil {
+}
+
+func validFakePublicationVerifier() *fakePublicationVerifier {
+	return &fakePublicationVerifier{snapshot: engineering.PublicationSnapshot{
+		Root: "/repo", Branch: "main", Head: loopHeadSHA, Tree: loopTreeSHA,
+		RemoteHead: loopHeadSHA, Clean: true, BaseAncestor: true,
+	}}
+}
+
+func TestManagedCompletionStoresObservedPublicationAndPlanDigest(t *testing.T) {
+	p := testPaths(t)
+	workspace := t.TempDir()
+	chdir(t, workspace)
+	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(managedLoopPlan("T-027")), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed", WorkspacePaths: []string{workspace}}, InitialNumSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := validFakePublicationVerifier()
+	if err := markComplete(p, "managed", st.TaskID, "done", managedLoopEvidence(), verifier); err != nil {
+		t.Fatal(err)
+	}
+	if verifier.calls != 1 || verifier.workspace != workspace {
+		t.Fatalf("publication verifier used wrong repository authority: calls=%d workspace=%q", verifier.calls, verifier.workspace)
+	}
+	if verifier.proof.Head != loopHeadSHA || verifier.proof.QualifiedTree != loopTreeSHA {
+		t.Fatalf("unexpected verifier proof: %+v", verifier.proof)
 	}
 	done, ok, err := LoadState(p, "managed")
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
+	if !done.Complete || !done.Verified {
+		t.Fatalf("managed completion not recorded: %+v", done)
+	}
+	joined := strings.Join(done.Verification, "\n")
+	for _, want := range []string{
+		"publication-verified:" + loopHeadSHA,
+		"publication-tree:" + loopTreeSHA,
+		"publication-remote:" + loopHeadSHA,
+		"checkpoint-verified:plan:T-027",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing observed evidence %q: %v", want, done.Verification)
+		}
+	}
 	if last := done.Verification[len(done.Verification)-1]; !strings.HasPrefix(last, "plan-digest:") {
-		t.Fatalf("missing plan digest: %v", done.Verification)
+		t.Fatalf("missing final plan digest: %v", done.Verification)
+	}
+}
+
+func TestManagedCompletionVerifierFailureDoesNotMarkDone(t *testing.T) {
+	p := testPaths(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(managedLoopPlan("T-027")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed-fail", WorkspacePaths: []string{workspace}}, InitialNumSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := validFakePublicationVerifier()
+	verifier.err = fmt.Errorf("remote head moved")
+	if err := markComplete(p, "managed-fail", st.TaskID, "done", managedLoopEvidence(), verifier); err == nil || !strings.Contains(err.Error(), "remote head moved") {
+		t.Fatalf("expected publication verification failure, got %v", err)
+	}
+	got, ok, err := LoadState(p, "managed-fail")
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if got.Complete || got.Verified {
+		t.Fatalf("failed publication proof marked task complete: %+v", got)
+	}
+}
+
+func TestManagedCompletionRequiresVerifier(t *testing.T) {
+	p := testPaths(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(managedLoopPlan("T-027")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed-no-verifier", WorkspacePaths: []string{workspace}}, InitialNumSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markComplete(p, "managed-no-verifier", st.TaskID, "done", managedLoopEvidence(), nil); err == nil || !strings.Contains(err.Error(), "publication verifier") {
+		t.Fatalf("expected fail-closed verifier error, got %v", err)
 	}
 }
