@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const SchemaVersion = 13
+const SchemaVersion = 14
 
 type migration struct {
 	Version int

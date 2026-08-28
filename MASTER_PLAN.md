@@ -16,12 +16,13 @@ Target loop:
 
 The existing durable harness is the foundation, not a rewrite target. It already has adaptive DAG replanning, SQLite/WAL durability, fair READY scheduling, physical resource feasibility, worker registry, fenced attempt leases, effect intents, `IN_DOUBT`, retries, waits, approvals, artifacts/workspaces, AGY/Antigravity execution, a generic agent executor, workflow budgets and Linux/Windows CI.
 
-Current missing layer: provider-account/model/session capacity and assignment. Scheduler feasibility currently models CPU/RAM/GPU/disk/build/browser resources, not external LLM capacity.
-
-Completed foundation:
+Provider-control-plane foundation now completed:
 
 - T-001 provider-domain primitives are on `main` as `bf060a70833504fc5dc979181d59453276a56e0c`.
-- T-002 observation adapter/registry is verified and complete in the current iteration.
+- T-002 observation adapter/registry is on `main` as `ac35b5193c735897a75cb056680215a4e3aae428`.
+- T-003 SQLite v14 provider-observation schema is implemented and fully verified on the validation branch; publication to `main` is the current iteration's final action.
+
+Current missing layer after T-003: durable provider observation Store contracts and read/write implementation, followed by real Antigravity/Codex observation adapters and quota-aware selection.
 
 ## 3. Architecture Map
 
@@ -83,7 +84,17 @@ Orthogonal concepts MUST stay separate:
 
 Repository CI (`.github/workflows/harness-ci.yml`) enforces module tidiness, JS bridge syntax/contracts, `go test ./...`, `go test -race ./...`, `go vet ./...`, compiler/store/scheduler/retry/wait smoke benchmarks and Windows tests.
 
-Persistence baseline before provider work: SQLite schema v13 with immutable checksummed migrations. Provider persistence must begin at v14; migrations 1..13 must remain byte-identical.
+Persistence baseline before provider work was SQLite schema v13 with immutable checksummed migrations. T-003 appends v14 only; migrations 1..13 remain byte-identical.
+
+T-003 verification on head `852de9ef606ea358b1235a02c3886a9bab2c1b95`:
+
+- module graph tidy: PASS;
+- bridge syntax/contracts: PASS;
+- unit/integration: PASS;
+- race detector: PASS;
+- vet: PASS;
+- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
+- Windows tests: PASS.
 
 ## 5. System Invariants
 
@@ -99,20 +110,21 @@ Persistence baseline before provider work: SQLite schema v13 with immutable chec
 - **I-010 Dynamic discovery.** Core logic does not hard-code transient provider model names or reverse-engineer opaque quota IDs.
 - **I-011 Bounded uncertainty.** Unknown/stale provider capacity lowers score/concurrency; it is never treated as unlimited.
 - **I-012 Incremental migration.** Observe -> shadow -> advisory -> auto read-only -> isolated writes -> failover -> commit coordination -> default -> legacy deletion.
+- **I-013 Released migration immutability.** A new schema revision is append-only; prior released migration SQL/checksums are never edited.
 
 ## 6. Findings Registry
 
 ### F-001 — Provider capacity is not a scheduler dimension
 **Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
-Physical feasibility exists; provider quota/model/session feasibility does not. Affects T-001..T-013.
+Physical feasibility exists; provider quota/model/session feasibility does not. Affects T-004..T-014.
 
 ### F-002 — Codex is not a first-class provider
 **Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
-Current generic-terminal support does not expose normalized account/model/quota/session contracts. Affects T-002,T-007,T-012.
+Current generic-terminal support does not expose normalized account/model/quota/session contracts. Affects T-007,T-012,T-014.
 
 ### F-003 — Workflow budget cannot substitute for provider quota
 **Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
-`internal/harness/budget` tracks allowed task/workflow consumption, not external service supply. Affects T-003..T-011.
+`internal/harness/budget` tracks allowed task/workflow consumption, not external service supply. Affects T-004..T-011.
 
 ### F-004 — No durable quota reservation ledger
 **Status:** Planned. **Severity:** Critical. **Confidence:** Confirmed.  
@@ -120,7 +132,7 @@ Parallel dispatchers can otherwise observe the same headroom and oversubscribe i
 
 ### F-005 — Existing worker/lease subsystem must be reused
 **Status:** Resolved by architecture. **Severity:** High.  
-Provider assignment is orthogonal to `Worker` and existing fenced leases. Affects T-001,T-012,T-016.
+Provider assignment is orthogonal to `Worker` and existing fenced leases. Affects T-012,T-016.
 
 ### F-006 — Existing `IN_DOUBT` + effect intents already provide unsafe-replay detection
 **Status:** Resolved by architecture. **Severity:** Critical.  
@@ -147,13 +159,18 @@ Naive quota balancing can waste tokens by abandoning a high-affinity context. Af
 Affects T-009,T-020,T-021.
 
 ### F-012 — Released SQLite migrations are immutable
-**Status:** Resolved by architecture. **Severity:** High.  
-Provider persistence starts at v14; v1..v13 are untouched. Affects T-003,T-005.
+**Status:** Resolved. **Severity:** High. **Confidence:** Confirmed.  
+T-003 appends v14 in a new migration file and changes only `SchemaVersion 13 -> 14`; diff inspection confirms v1..v13 migration files are untouched.
 
 ### F-013 — Unified provider execution interface is premature before TaskEnvelope
 **Status:** Planned. **Severity:** Medium. **Confidence:** Strong.  
-Evidence: `internal/harness/executor/agent/agent.go` uses a `ModelClient` loop while AGY/process execution has a distinct protocol/executor path. Freezing `AgentRuntime` during T-002 would couple observation to incomplete portable execution semantics.  
-**Decision:** T-002 is observation-only; portable provider execution is defined with/after T-013 TaskEnvelope and activated in T-014. Affects T-002,T-013,T-014.
+`internal/harness/executor/agent/agent.go` uses a `ModelClient` loop while AGY/process execution has a distinct protocol/executor path. Portable execution waits for T-013 TaskEnvelope and activates in T-014.
+
+### F-014 — Concurrent autonomous work can move `main` during an iteration
+**Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
+**Evidence:** while a validation branch was based on `2c10ec8`, `main` advanced through T-001/T-002 to `ac35b51`; an obsolete validation branch became diverged.  
+**Impact:** validates the need for mandatory pre-push ref recheck, semantic reconciliation, fast-forward-only publication and ultimately T-018/T-019 Commit Coordinator fencing.  
+**Decision:** obsolete duplicate validation work is not merged; current tasks must always re-read `main` immediately before publication.
 
 ## 7. Risk Register
 
@@ -162,6 +179,7 @@ Evidence: `internal/harness/executor/agent/agent.go` uses a `ModelClient` loop w
 | quota oversubscription | Critical | atomic reservation transaction + expiry + settlement |
 | duplicate side effects during failover | Critical | effect intents + existing `IN_DOUBT` + replay-safety gate |
 | simultaneous `main` writes | Critical | fenced Commit Coordinator |
+| remote `main` moves during iteration | High | ref recheck + semantic reconcile + fast-forward-only update |
 | stale plan execution | High | plan revision/digest on TaskEnvelope/assignment |
 | provider API drift | High | tolerant adapter boundary + dynamic discovery + fixtures |
 | opaque quota semantics | High | preserve native IDs/metric type/confidence; never guess mapping |
@@ -172,17 +190,17 @@ Evidence: `internal/harness/executor/agent/agent.go` uses a `ModelClient` loop w
 
 ## 8. Pareto Improvements
 
-Highest leverage sequence: provider model -> live observation registry -> durable observations -> Antigravity/Codex adapters -> normalized capacity -> conservative estimator -> atomic reservations -> shadow selector -> TaskEnvelope/plan digest -> safe read-only routing -> provider-aware retry/handoff -> isolated writes -> Commit Coordinator.
+Highest leverage remaining sequence: durable observations -> Antigravity/Codex adapters -> normalized capacity -> conservative estimator -> atomic reservations -> shadow selector -> TaskEnvelope/plan digest -> safe read-only routing -> provider-aware retry/handoff -> isolated writes -> Commit Coordinator.
 
 ## 9. Dependency DAG
 
 ```text
-T001 provider primitives
-  -> T002 observation adapter/registry
-      -> T006 Antigravity adapter
-      -> T007 Codex adapter
-  -> T003 SQLite v14 observations
+T001 provider primitives DONE
+  -> T002 observation adapter/registry DONE
+  -> T003 SQLite v14 observations DONE
       -> T004 observation store
+          -> T006 Antigravity adapter
+          -> T007 Codex adapter
           -> T008 session broker
           -> T009 capacity normalization
       -> T005 assignment/reservation/usage v15
@@ -218,27 +236,29 @@ T026 final re-audit <- T025
 
 ### T-001 — Add provider-domain primitives
 **Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
-Files: `internal/harness/model/provider.go`, `ids.go`, provider tests. Added provider/account/session/quota vocabulary and provider IDs without runtime behavior changes.  
-Verification: full Linux/Windows Harness CI PASS.  
-Commit on main: `bf060a70833504fc5dc979181d59453276a56e0c`.
+Files: `internal/harness/model/provider.go`, `ids.go`, provider tests.  
+Commit: `bf060a70833504fc5dc979181d59453276a56e0c`.
 
 ### T-002 — Define observation adapter and live registry
 **Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
 Files: `internal/harness/provider/provider.go`, `registry.go`, `registry_test.go`.  
-Implemented account-scoped `CapacitySource`, `ModelSource`, `SessionSource`, composite observation `Adapter`, and concurrency-safe deterministic `Registry`. Registry binds durable account identity to the live refresh adapter; it does not persist observations.  
-Non-goal: portable provider execution is deferred; T-013/T-014 own that boundary after TaskEnvelope exists.  
-Tests: register/get/list, deterministic ordering, duplicate rejection, provider-kind mismatch, invalid state/identity, concurrent register/read under race detector.  
-Verification: full Linux/Windows Harness CI PASS, including unit/integration, race, vet and all configured smoke benchmarks.  
-Acceptance: no scheduler/execution behavior changes; no provider-specific logic in core registry.  
-Dependencies: T-001.
+Commit: `ac35b5193c735897a75cb056680215a4e3aae428`.  
+Portable execution remains deferred to T-013/T-014.
 
 ### T-003 — Add immutable SQLite v14 provider-observation schema
-**Status:** READY. **Priority:** P0.  
-Add `provider_accounts`, `provider_models`, `provider_capacity_snapshots`, `provider_quota_windows`, `provider_sessions`; bump SchemaVersion only by appending v14. Tests: fresh DB, v13->v14 upgrade, FK/integrity, immutable prior checksum contract. Dependencies: T-001.
+**Status:** DONE. **Priority:** P0. **Leverage:** HIGH.  
+Files: `internal/harness/store/sqlite/migration_v14_provider_observation.go`, `migration_v14_provider_observation_test.go`, `migrations.go`.  
+Implementation: append v14 tables `provider_accounts`, `provider_models`, `provider_capacity_snapshots`, `provider_quota_windows`, `provider_sessions`; retain provider-native quota window identity/metric/confidence and permit session observation before model-catalog refresh.  
+Tests: v13->v14 upgrade, table/index existence, FK rejection, quota fraction bound, session context bound, out-of-order session/model observation; existing fresh DB/replay/checksum suite remains applicable.  
+Verification: full Linux/Windows Harness CI PASS on pre-plan-reconciliation head `852de9ef606ea358b1235a02c3886a9bab2c1b95`.  
+Acceptance: no scheduler/execution behavior changes; v1..v13 untouched; v14 is append-only.  
+Dependencies: T-001.
 
 ### T-004 — Add provider observation store contracts
-**Status:** TODO. **Priority:** P0.  
-Extend Store Reader/Tx and SQLite implementation for account/model/session upsert, capacity append, latest capacity and usable-account queries. Tests: roundtrip, ordering/staleness, conflicts, concurrent readers. Dependencies: T-003.
+**Status:** READY. **Priority:** P0. **Leverage:** HIGH.  
+Extend Store Reader/Tx and SQLite implementation for account/model/session upsert, capacity append, latest capacity and usable-account queries.  
+Tests: account/model/session roundtrip; atomic snapshot+window append; deterministic latest selection; staleness ordering; missing-account FK; writer conflicts; concurrent WAL readers.  
+Non-goal: no routing or provider-specific protocol parsing. Dependencies: T-003.
 
 ### T-005 — Persist assignments/reservations/usage/circuit state in v15
 **Status:** TODO. **Priority:** P0.  
@@ -274,7 +294,7 @@ Hard filter: health/capabilities/model/context/risk. Soft ranking: projected quo
 
 ### T-013 — Introduce TaskEnvelope and plan digest
 **Status:** TODO. **Priority:** P0.  
-Envelope carries task/plan revision+digest, objective, evidence, scope/non-goals, invariants, findings, required capabilities, acceptance/verification, risk, replay safety, workspace and checkpoint. Generated plan index is disposable and source-digest bound. This task also defines the provider-neutral execution request contract deferred from T-002. Dependencies: T-012.
+Envelope carries task/plan revision+digest, objective, evidence, scope/non-goals, invariants, findings, required capabilities, acceptance/verification, risk, replay safety, workspace and checkpoint. Generated plan index is disposable and source-digest bound. Defines provider-neutral execution request contract. Dependencies: T-012.
 
 ### T-014 — Enable automatic read-only provider routing
 **Status:** TODO. **Priority:** P1.  
@@ -330,15 +350,19 @@ Repeat architecture/correctness/concurrency/security/persistence/API/testing/mut
 
 ## 12. Testing Strategy
 
-For every atomic task: characterization/contract -> targeted package -> store/integration -> concurrency/race when shared state changes -> property/fuzz for normalization/state machines -> full `go test ./...` -> `go test -race ./...` -> `go vet ./...` -> existing benchmarks. Provider live probes remain opt-in; normal CI uses recorded deterministic fixtures and no secrets.
+For every atomic task: characterization/contract -> targeted package -> store/integration -> concurrency/race when shared state changes -> property/fuzz for normalization/state machines -> full `go test ./...` -> `go test -race ./...` -> `go vet ./...` -> existing benchmarks. Provider live probes remain opt-in; normal CI uses deterministic fixtures and no secrets.
+
+For schema tasks specifically: fresh DB + previous-version upgrade + FK/CHECK negative tests + replay prevention + explicit diff audit proving earlier released migration files were not modified.
 
 ## 13. Mutation Testing Strategy
 
-Mandatory mutation targets once implemented: quota `<`/`<=`, omitted reservation subtraction, stale observation acceptance, plan-digest bypass, replay-safe branch inversion, `IN_DOUBT` bypass, circuit OPEN/HALF_OPEN changes, settlement idempotency and commit-fencing bypass. A surviving mutant becomes a finding if contract ambiguity caused it.
+Mandatory mutation targets once critical executable policy exists: quota `<`/`<=`, omitted reservation subtraction, stale observation acceptance, plan-digest bypass, replay-safe branch inversion, `IN_DOUBT` bypass, circuit OPEN/HALF_OPEN changes, settlement idempotency and commit-fencing bypass. A surviving mutant becomes a finding if contract ambiguity caused it.
+
+T-003 is schema-only; mutation tooling is not required for this iteration because behavior is enforced by SQLite constraints plus negative migration tests. The quota-selection and state-machine mutation requirement begins with T-011.
 
 ## 14. Performance Baselines
 
-Do not materially regress current harness benchmarks. Add: latest-capacity read with 10k historical snapshots; aggregate 10k reservations; selection over 1k READY nodes x 8 candidates; 100 concurrent reservation attempts; route explanation without N+1 queries. Provider-selection overhead must remain bounded and small relative to network/model latency.
+Do not materially regress current harness benchmarks. Add later: latest-capacity read with 10k historical snapshots; aggregate 10k reservations; selection over 1k READY nodes x 8 candidates; 100 concurrent reservation attempts; route explanation without N+1 queries. Provider-selection overhead must remain bounded and small relative to network/model latency.
 
 ## 15. Security Hardening
 
@@ -362,12 +386,14 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 - **R-004 Hard-coded model/bucket IDs:** rejected; catalogs and opaque IDs drift.
 - **R-005 Failover on any failure:** rejected; implementation/test failures are not provider failures.
 - **R-006 Every worker pushes main:** rejected; causes semantic races.
-- **R-007 Define unified AgentRuntime in T-002:** rejected after F-013; portable execution waits for TaskEnvelope.
+- **R-007 Define unified AgentRuntime in T-002:** rejected; portable execution waits for TaskEnvelope.
+- **R-008 Merge obsolete diverged validation branch:** rejected after F-014; only reconcile against current `main`, never overwrite newer work.
 
 ## 19. Completed Tasks
 
-- **T-001:** DONE on `main`, commit `bf060a70833504fc5dc979181d59453276a56e0c`; full Harness CI passed.
-- **T-002:** DONE in this verified iteration; observation adapter/registry contracts and concurrency tests passed full Linux/Windows Harness CI.
+- **T-001:** DONE, `bf060a70833504fc5dc979181d59453276a56e0c`, full Harness CI PASS.
+- **T-002:** DONE, `ac35b5193c735897a75cb056680215a4e3aae428`, full Harness CI PASS.
+- **T-003:** DONE on validation head; full Harness CI PASS; final fast-forward publication pending this plan reconciliation commit.
 
 ## 20. Iteration Log
 
@@ -386,8 +412,20 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 **Changes:** observation-only `CapacitySource`/`ModelSource`/`SessionSource`, composite account `Adapter`, concurrency-safe deterministic live `Registry`, contract/race tests.  
 **Plan changes:** unified execution contract deferred to T-013/T-014 because TaskEnvelope is required to avoid coupling AGY/process and `ModelClient` semantics.  
 **Verification:** Linux/Windows Harness CI PASS: module tidy, bridge contracts, unit/integration, race, vet and configured smoke benchmarks.  
-**Commit/Push:** this verified iteration is to be published as one fast-forward commit on `main`, no force.  
+**Commit:** `ac35b5193c735897a75cb056680215a4e3aae428`.  
+**Push:** main, fast-forward, no force.  
 **Result:** PASS.
+
+### Iteration 3
+**Task:** T-003  
+**Findings addressed:** F-003 persistence foundation, F-012 migration immutability.  
+**Unexpected findings:** F-014 concurrent `main` movement during autonomous work.  
+**Changes:** SQLite schema v14 for provider accounts, models, capacity snapshots, native quota windows and sessions; schema bounds/FK constraints; v13->v14 tests.  
+**Tests:** full Harness CI PASS on implementation head `852de9ef606ea358b1235a02c3886a9bab2c1b95`; plan-only reconciliation commit must receive the same CI before publication.  
+**Plan changes:** T-003 DONE; T-004 READY; explicit remote-main movement risk and reconciliation invariant added.  
+**Commit:** pending final plan reconciliation head.  
+**Push:** pending fast-forward to main after final CI and main-ref recheck.  
+**Result:** VERIFYING.
 
 ## 21. Definition of Final Done
 
