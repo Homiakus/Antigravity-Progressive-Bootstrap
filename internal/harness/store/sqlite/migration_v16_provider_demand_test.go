@@ -21,8 +21,8 @@ func TestVersionFifteenToSixteenCreatesProviderDemandHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 16 {
-		t.Fatalf("schema version=%d want=16", version)
+	if version != SchemaVersion {
+		t.Fatalf("schema version=%d want=%d", version, SchemaVersion)
 	}
 	for _, name := range []string{"provider_demand_dimensions", "provider_demand_dimensions_by_classes", "provider_usage_samples_by_model_metric_observed"} {
 		var got string
@@ -39,24 +39,6 @@ func TestProviderDemandSchemaRejectsMissingUsageAndInvalidClasses(t *testing.T) 
 INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class)
 VALUES('missing-usage','code','medium','warm')`); err == nil {
 		t.Fatal("demand dimensions without usage unexpectedly accepted")
-	}
-	// CHECK constraints remain independently enforceable even when callers bypass
-	// the Go validation boundary.
-	for _, tc := range []struct {
-		name string
-		task string
-		repo string
-		ctx  string
-	}{
-		{name: "empty-task", task: "", repo: "medium", ctx: "warm"},
-		{name: "empty-repo", task: "code", repo: "", ctx: "warm"},
-		{name: "empty-context", task: "code", repo: "medium", ctx: ""},
-		{name: "long-context", task: "code", repo: "medium", ctx: strings.Repeat("x", 129)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// Missing usage alone would also fail the FK, so create a minimal valid
-			// parent row graph first and exercise class CHECKs through a real usage.
-		})
 	}
 
 	now := time.Unix(61000, 0).UTC()
