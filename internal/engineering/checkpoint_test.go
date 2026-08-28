@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func checkpointFields(task string) string {
+	return "`CURRENT HEAD:` published-main-head.  \n" +
+		"`CURRENT QUALIFIED MILESTONE:` publication proof verified.  \n" +
+		"`ARCHITECTURE:` completion validator is read-only.  \n" +
+		"`CRITICAL INVARIANTS:` I-008,I-009.  \n" +
+		"`COMPLETED THIS ITERATION:` " + task + ".  \n" +
+		"`RESOLVED FINDINGS:` F-031.  \n" +
+		"`OPEN CRITICAL/HIGH FINDINGS:` F-004,F-007.  \n" +
+		"`BLOCKERS:` none.  \n" +
+		"`NEXT TASK:` T-010.  \n" +
+		"`WHY NEXT:` unlock critical reservation correctness.  \n" +
+		"`CRITICAL FILES:` internal/engineering/process.go.  \n" +
+		"`VERIFICATION COMMANDS:` go test ./....  \n" +
+		"`IMPORTANT DECISIONS:` validator does not push.  \n" +
+		"`REJECTED OPTIONS:` free-form publication claims.  \n" +
+		"`NEW PROCESS LEARNING:` verify evidence.\n"
+}
+
 func checkpointPlan(task string) string {
 	return `# MASTER PLAN
 
@@ -13,14 +31,7 @@ func checkpointPlan(task string) string {
 
 ### Context Compression Checkpoint — after T-029
 
-` + "`CURRENT QUALIFIED MILESTONE:` publication proof verified.  \n" +
-		"`CRITICAL INVARIANTS:` I-008,I-009.  \n" +
-		"`COMPLETED THIS ITERATION:` " + task + ".  \n" +
-		"`NEXT TASK:` T-030.  \n" +
-		"`WHY NEXT:` structural audit.  \n" +
-		"`VERIFICATION COMMANDS:` go test ./....  \n" +
-		"`IMPORTANT DECISIONS:` validator does not push.  \n" +
-		"`NEW PROCESS LEARNING:` verify evidence.\n"
+` + checkpointFields(task)
 }
 
 func TestValidatePlanCheckpoint(t *testing.T) {
@@ -30,15 +41,7 @@ func TestValidatePlanCheckpoint(t *testing.T) {
 }
 
 func TestLatestPlanCheckpointMustMatchCurrentTask(t *testing.T) {
-	plan := checkpointPlan("T-028") + "\n\n### Context Compression Checkpoint — newer\n\n" +
-		"`CURRENT QUALIFIED MILESTONE:` newer.  \n" +
-		"`CRITICAL INVARIANTS:` I-008.  \n" +
-		"`COMPLETED THIS ITERATION:` T-028.  \n" +
-		"`NEXT TASK:` T-029.  \n" +
-		"`WHY NEXT:` proof.  \n" +
-		"`VERIFICATION COMMANDS:` go test.  \n" +
-		"`IMPORTANT DECISIONS:` none.  \n" +
-		"`NEW PROCESS LEARNING:` stale cannot pass.\n"
+	plan := checkpointPlan("T-029") + "\n\n### Context Compression Checkpoint — newer\n\n" + checkpointFields("T-028")
 	if err := ValidatePlanCheckpoint(plan, "T-029"); err == nil || !strings.Contains(err.Error(), "stale") {
 		t.Fatalf("expected stale checkpoint rejection, got %v", err)
 	}
