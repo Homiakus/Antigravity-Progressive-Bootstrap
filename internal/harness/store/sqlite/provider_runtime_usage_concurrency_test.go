@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -43,7 +44,7 @@ func TestProviderUsageSampleConcurrentReplayCreatesExactlyOnce(t *testing.T) {
 					return err
 				}
 				if stored.Key != sample.Key || stored.Amount != sample.Amount || !stored.ObservedAt.Equal(sample.ObservedAt) {
-					t.Fatalf("unexpected replay result: %+v", stored)
+					return fmt.Errorf("unexpected replay result: %+v", stored)
 				}
 				if wasCreated {
 					created.Add(1)
