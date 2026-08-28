@@ -24,6 +24,8 @@ type IDKind string
 
 const (
 	IDRepository      IDKind = "rep"
+	IDWorkspace       IDKind = "rws"
+	IDConversation    IDKind = "rcv"
 	IDRemoteSession   IDKind = "rsi"
 	IDTelegramBinding IDKind = "tgb"
 	IDRemoteCommand   IDKind = "rcm"
@@ -76,7 +78,7 @@ func ValidateGeneratedID(id string, kind IDKind) error {
 
 func validIDKind(kind IDKind) bool {
 	switch kind {
-	case IDRepository, IDRemoteSession, IDTelegramBinding, IDRemoteCommand, IDRemoteEvent:
+	case IDRepository, IDWorkspace, IDConversation, IDRemoteSession, IDTelegramBinding, IDRemoteCommand, IDRemoteEvent:
 		return true
 	default:
 		return false

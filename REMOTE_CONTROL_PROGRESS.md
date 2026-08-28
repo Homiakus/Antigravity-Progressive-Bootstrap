@@ -1,38 +1,29 @@
 # Remote Control implementation progress
 
-Этот файл является кратким журналом выполнения `REMOTE_CONTROL_IMPLEMENTATION_PLAN_RU.md`.
-
 ## Current baseline
 
-- [x] R0 — capability probe scaffold и capability matrix добавлены.
-- [ ] R0 — runtime capability verification на установленной Antigravity IDE.
-- [x] R1 — типизированная remote domain model, ID kinds, state enums и validation contracts.
-- [x] R2 — migration v11 с durable remote-control schema в существующем Harness `state.db`.
-- [x] R2 — repository store contract и SQLite implementation.
-- [x] R3 — repository registry + CLI `agctl remote status`, `remote repo add|list|enable|disable`.
-- [x] R4 — фактический Cockpit `working_dir` gap локализован; reproducible patch contract зафиксирован.
-- [ ] R4 — patch применён в writable Cockpit fork/upstream (`jlcodes99/cockpit-tools` доступен `push:false`).
-- [ ] R5 — `cockpit-control` binary реализован в writable Cockpit fork; protocol v1 зафиксирован.
-- [x] R6 — Go `cockpit.Client` + strict CLI protocol adapter + secret-field fail-closed tests.
-- [x] R7 — собственный loopback-only Antigravity Bridge scaffold с command-fallback conversation control и registration metadata.
-- [x] R8 — Go Bridge HTTP client с loopback enforcement, bearer auth, protocol negotiation и strict decoding.
-- [ ] R7/R8 — runtime capability verification на реальной Antigravity IDE и packaging/install VSIX.
-- [ ] R9+ — single-instance RemoteSession/session reconciliation/Telegram.
+- [x] R0 — capability probe scaffold/matrix; runtime verification on installed Antigravity remains pending.
+- [x] R1 — typed remote domain model and validation contracts.
+- [x] R2 — durable schema v11 in Harness `state.db`; repository/instance/conversation/session stores.
+- [x] R3 — repository registry + `agctl remote repo` CLI.
+- [x] R4 — Cockpit `working_dir` gap localized and patch contract documented; upstream application pending because `jlcodes99/cockpit-tools` is `push:false`.
+- [ ] R5 — `cockpit-control` physical binary in writable Cockpit fork; protocol v1 is defined.
+- [x] R6 — strict Go Cockpit adapter; managed launch context carries Bridge bootstrap only via child environment, never argv.
+- [x] R7 — loopback-only Antigravity Bridge command-fallback scaffold.
+- [x] R8 — strict Go Bridge client + authenticated registration discovery/re-attachment.
+- [x] R9 — single-instance RemoteSession provisioning saga implemented with repository/account/workspace/capability/conversation gates and rollback-stop on failure.
+- [ ] R9 — real-machine E2E requires physical `cockpit-control` build + Bridge VSIX install.
+- [ ] R10+ — reconciler, multi-conversation, multi-instance, worktree isolation, Telegram.
 
-## Architectural decisions already enforced
+## Enforced decisions
 
-1. Cockpit credentials не входят в remote domain model.
-2. Telegram transport не является источником истины.
-3. Remote state хранится в существующем durable Harness SQLite, отдельная `remote.db` не создаётся.
-4. `remote_events` отделены от workflow `events`, потому что IDE events не обязаны иметь `workflow_run_id`.
-5. `(source, source_message_id)` в `remote_commands` является durable idempotency key.
-6. Активная Telegram topic binding уникальна по `(chat_id, thread_id)`.
-7. Репозиторий регистрируется только через canonical Git root; удалённые transports обязаны работать только с зарегистрированными repo IDs.
-8. Внутренние Antigravity capability не считаются доступными без negotiation/runtime verification.
-9. `agctl` не читает/пишет Cockpit internal state: интеграция только через versioned `cockpit-control` contract.
-10. Antigravity Bridge слушает только loopback; Go client также fail-closed отклоняет non-loopback URL.
-11. Command-fallback dispatch сериализует `focus → send`, поэтому параллельные Telegram/remote sends не могут перескочить между conversations внутри одного Bridge.
+1. Cockpit credentials are absent from remote DTOs and durable state.
+2. Bridge token is per-launch, passed only in environment, never argv/registration/SQLite.
+3. Registration is not trusted by itself: discovery performs authenticated `/v1/health` and verifies instance + boot nonce.
+4. Session becomes `READY` only after repo, account, process, Bridge, workspace, capabilities and conversation all agree.
+5. R9 does not silently open a mismatched workspace; it fails closed. R4 Cockpit launch must open the declared `working_dir`.
+6. Worktree isolation is intentionally rejected by R9 until R13 uses the existing Harness Workspace Manager.
 
 ## Next critical path
 
-`R9 single-instance RemoteSession → R10 reconciler → R11 multi-conversation → R12 multi-instance`, параллельно требуется writable Cockpit fork для физического R4/R5 и runtime Antigravity verification для расширения capabilities.
+`R10 reconciler → R11 multi-conversation dispatch gates → R12 multi-instance resolver → R13 Harness worktree isolation`, while external R4/R5 and runtime Antigravity verification remain environment-dependent gates.

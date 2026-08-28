@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/homiakus/agctl/internal/remote/model"
 )
@@ -20,6 +21,29 @@ type RepositoryStore interface {
 	SetRepositoryEnabled(context.Context, model.RepositoryID, bool) error
 }
 
+type InstanceStore interface {
+	UpsertInstance(context.Context, model.InstanceMirror) error
+	GetInstance(context.Context, model.InstanceID) (model.InstanceMirror, error)
+	ListInstances(context.Context) ([]model.InstanceMirror, error)
+}
+
+type ConversationStore interface {
+	UpsertConversation(context.Context, model.Conversation) error
+	GetConversation(context.Context, model.ConversationID) (model.Conversation, error)
+	GetConversationByProvider(context.Context, model.InstanceID, string) (model.Conversation, error)
+	ListConversationsByInstance(context.Context, model.InstanceID) ([]model.Conversation, error)
+}
+
+type SessionStore interface {
+	CreateSession(context.Context, model.RemoteSession) error
+	GetSession(context.Context, model.RemoteSessionID) (model.RemoteSession, error)
+	UpdateSessionStates(context.Context, model.RemoteSessionID, model.SessionDesiredState, model.SessionObservedState, time.Time) error
+	ListSessionsByInstance(context.Context, model.InstanceID, bool) ([]model.RemoteSession, error)
+}
+
 type Store interface {
 	RepositoryStore
+	InstanceStore
+	ConversationStore
+	SessionStore
 }
