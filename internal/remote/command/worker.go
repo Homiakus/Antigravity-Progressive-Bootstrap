@@ -51,6 +51,17 @@ func (w *Worker) RunOnce(ctx context.Context, limit int) (int, error) {
 		if command.Kind != ConversationSend {
 			continue
 		}
+		// A missing live Bridge is transient and, importantly, may simply mean
+		// this daemon did not own the IDE boot that produced the persisted
+		// session. Do not burn the command into FAILED before a managed Bridge
+		// is actually available; leave it pending for a later recovery/start.
+		session, sessionErr := w.Store.GetSession(ctx, command.SessionID)
+		if sessionErr == nil {
+			if bridge, ok := w.Bridges.Bridge(string(session.CockpitInstanceID)); !ok || bridge.Client == nil {
+				continue
+			}
+		}
+
 		now := w.now()
 		if err := w.Store.UpdateRemoteCommandState(ctx, command.ID, model.CommandRunning, "", now); err != nil {
 			if errors.Is(err, remotestore.ErrConflict) {
