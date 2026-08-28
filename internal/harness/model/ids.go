@@ -66,6 +66,7 @@ type TimeSortableIDGenerator struct {
 func NewIDGenerator() TimeSortableIDGenerator {
 	return TimeSortableIDGenerator{Now: time.Now, Random: rand.Reader}
 }
+
 func (g TimeSortableIDGenerator) New(kind IDKind) (string, error) {
 	if !validIDKind(kind) {
 		return "", fmt.Errorf("unknown id kind %q", kind)
@@ -84,6 +85,7 @@ func (g TimeSortableIDGenerator) New(kind IDKind) (string, error) {
 	}
 	return fmt.Sprintf("%s_%013d_%s", kind, now().UTC().UnixMilli(), hex.EncodeToString(entropy[:])), nil
 }
+
 func validIDKind(kind IDKind) bool {
 	switch kind {
 	case IDWorkflowDefinition, IDWorkflowRun, IDNodeRun, IDAttempt, IDWorker, IDLease, IDArtifact, IDEvent, IDTimer, IDSignal, IDApproval, IDEffectIntent, IDProviderAccount, IDProviderSession, IDProviderAssignment, IDProviderReservation:
@@ -92,6 +94,7 @@ func validIDKind(kind IDKind) bool {
 		return false
 	}
 }
+
 func ValidateGeneratedID(id string, kind IDKind) error {
 	if !validIDKind(kind) {
 		return fmt.Errorf("unknown id kind %q", kind)
@@ -104,6 +107,7 @@ func ValidateGeneratedID(id string, kind IDKind) error {
 	}
 	return nil
 }
+
 func ValidateNodeID(id NodeID) error {
 	if !nodeIDRE.MatchString(string(id)) {
 		return fmt.Errorf("invalid node id %q", id)
