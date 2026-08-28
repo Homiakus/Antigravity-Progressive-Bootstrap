@@ -28,7 +28,8 @@ CREATE TABLE telegram_pairings (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
-    consumed_by_user_id INTEGER
+    consumed_by_user_id INTEGER,
+    consumed_chat_id INTEGER
 );
 
 CREATE INDEX telegram_pairings_expiry
