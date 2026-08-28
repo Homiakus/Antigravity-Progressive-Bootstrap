@@ -39,7 +39,9 @@ func TestStopRejectsPrematureAndAcceptsVerified(t *testing.T) {
 	if _, err := loop.EnableProfile(p, "deep"); err != nil {
 		t.Fatal(err)
 	}
-	pre := model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "c"}, InitialNumSteps: 1}
+	workspace := t.TempDir()
+	common := model.CommonHookInput{ConversationID: "c", WorkspacePaths: []string{workspace}}
+	pre := model.PreInvocationInput{CommonHookInput: common, InitialNumSteps: 1}
 	var out bytes.Buffer
 	if err := HandleLoopPreInvocation(p, "agctl", encode(pre), &out); err != nil {
 		t.Fatal(err)
@@ -48,7 +50,10 @@ func TestStopRejectsPrematureAndAcceptsVerified(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal("missing state")
 	}
-	stop := model.StopInput{CommonHookInput: model.CommonHookInput{ConversationID: "c"}, ExecutionNum: 1, TerminationReason: "model_stop", FullyIdle: true}
+	if len(st.WorkspacePaths) != 1 || st.WorkspacePaths[0] != workspace {
+		t.Fatalf("pre-invocation did not persist workspace identity: %v", st.WorkspacePaths)
+	}
+	stop := model.StopInput{CommonHookInput: common, ExecutionNum: 1, TerminationReason: "model_stop", FullyIdle: true}
 	out.Reset()
 	if err := HandleLoopStop(p, encode(stop), &out); err != nil {
 		t.Fatal(err)

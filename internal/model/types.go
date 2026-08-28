@@ -62,6 +62,7 @@ type LoopConfig struct {
 type TaskState struct {
 	ConversationID  string   `json:"conversationId"`
 	TaskID          string   `json:"taskId"`
+	WorkspacePaths  []string `json:"workspacePaths,omitempty"`
 	Complete        bool     `json:"complete"`
 	Verified        bool     `json:"verified"`
 	HardBlocker     bool     `json:"hardBlocker"`

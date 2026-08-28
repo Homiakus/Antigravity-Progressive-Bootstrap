@@ -38,6 +38,18 @@ jobs:
       - name: Bridge contract tests
         run: node --test extensions/agctl-antigravity-bridge/test/*.test.js
 
+      - name: Engineering process contract tests
+        run: go test ./internal/engineering
+
+      - name: Autonomous loop contract tests
+        run: go test ./internal/loop
+
+      - name: Hook lifecycle contract tests
+        run: go test ./internal/hooks
+
+      - name: Doctor integration contract tests
+        run: go test ./internal/doctor
+
       - name: Unit and integration tests
         run: go test ./...
 
@@ -86,6 +98,18 @@ jobs:
 
       - name: Bridge contract tests
         run: node --test extensions/agctl-antigravity-bridge/test/*.test.js
+
+      - name: Engineering process contract tests
+        run: go test ./internal/engineering
+
+      - name: Autonomous loop contract tests
+        run: go test ./internal/loop
+
+      - name: Hook lifecycle contract tests
+        run: go test ./internal/hooks
+
+      - name: Doctor integration contract tests
+        run: go test ./internal/doctor
 
       - name: Windows tests
         run: go test ./...

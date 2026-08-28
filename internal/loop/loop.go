@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/homiakus/agctl/internal/engineering"
 	"github.com/homiakus/agctl/internal/jsonx"
 	"github.com/homiakus/agctl/internal/model"
 	"github.com/homiakus/agctl/internal/paths"
@@ -106,8 +107,15 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 		return old, err
 	}
 	// Stop-continue may start another invocation/execution while the task is still incomplete.
-	// Never overwrite an active incomplete state.
+	// Never overwrite an active incomplete state. Older state files did not persist
+	// workspace identity, so safely backfill it from the current invocation once.
 	if exists && !old.Complete && !old.HardBlocker {
+		if len(old.WorkspacePaths) == 0 && len(in.WorkspacePaths) > 0 {
+			old.WorkspacePaths = copyWorkspacePaths(in.WorkspacePaths)
+			if err := SaveState(p, old); err != nil {
+				return old, err
+			}
+		}
 		return old, nil
 	}
 	// If the last task completed, a larger trajectory size indicates a later user turn.
@@ -119,6 +127,7 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 	st := model.TaskState{
 		ConversationID:  in.ConversationID,
 		TaskID:          taskID,
+		WorkspacePaths:  copyWorkspacePaths(in.WorkspacePaths),
 		InitialNumSteps: in.InitialNumSteps,
 		StartedAt:       time.Now().Format(time.RFC3339Nano),
 		UpdatedAt:       time.Now().Format(time.RFC3339Nano),
@@ -128,6 +137,23 @@ func EnsureTaskState(p paths.Paths, in model.PreInvocationInput) (model.TaskStat
 		return st, err
 	}
 	return st, nil
+}
+
+func copyWorkspacePaths(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func shortID(s string) string {
@@ -149,26 +175,46 @@ You own the delegated outcome, not just the next step. Do not stop after a plan,
 
 Task ID: %s
 
-Mandatory cycle:
-1. infer a concrete Definition of Done from the user's request and repository contracts;
-2. inspect the relevant implementation and configuration;
-3. implement the next missing requirement;
-4. run the strongest practical targeted verification;
-5. on failure: capture evidence -> diagnose root cause -> change approach/code -> rerun;
-6. review all original requirements for omissions;
-7. run broader regression/build/E2E/security checks where applicable;
-8. inspect the final diff/state;
-9. only then mark the task complete.
+%s
 
-Before your final answer, call this program through the terminal to record verified completion:
-%s state complete --conversation %q --task-id %q --summary "<concise summary>" --verify "<actual check 1>" --verify "<actual check 2>"
+Mandatory immediate behavior:
+1. synchronize repository/main and inspect changes since the last checkpoint;
+2. read MASTER_PLAN.md and project instructions before substantial engineering work;
+3. select exactly one atomic T-XXX by risk/dependency leverage, mark it IN_PROGRESS, and record a Pre-flight Contract;
+4. characterize existing behavior before modifying production code where practical;
+5. implement the minimum root-cause fix;
+6. verify from cheap targeted checks upward; classify failures instead of retrying blindly;
+7. attack the solution with edge-space, security, concurrency/persistence and mutation/test-of-tests thinking where applicable;
+8. reconcile findings/tasks/dependencies and improve the process mechanism that allowed late detection;
+9. inspect the final diff and re-check remote main before publication;
+10. push only a qualified state to main without force, verify remote HEAD, write the context checkpoint, then continue to the next task unless convergence/blocker rules stop the loop.
 
-Only use verification entries for checks that actually ran. The Stop hook will reject premature termination unless complete=true, verified=true, hardBlocker=false and verification evidence is non-empty.
+Before your final answer, call this program through the terminal to record verified completion. In a repository containing MASTER_PLAN.md, every --verify category required by the living-plan contract must be present with real evidence or a reasoned not-applicable explanation:
+%s state complete --conversation %q --task-id %q --summary "<concise summary>" \
+  --verify "task:T-XXX" \
+  --verify "preflight:<root cause/invariants/change+protected surface/rollback>" \
+  --verify "characterization:<regression evidence>" \
+  --verify "edge-space:<pairwise + high-risk N-wise/property/fuzz/fault cases>" \
+  --verify "tests:<actual targeted/full checks>" \
+  --verify "mutation:<actual result or n/a: reason>" \
+  --verify "race:<actual result or n/a: reason>" \
+  --verify "static:<actual result>" \
+  --verify "security:<review result>" \
+  --verify "compatibility:<review result>" \
+  --verify "performance:<measurement or n/a: reason>" \
+  --verify "findings:<declared F-XXX IDs or none: reason>" \
+  --verify "self-review:<adversarial architecture/simplification result>" \
+  --verify "plan-reconcile:<MASTER_PLAN reconciliation>" \
+  --verify "process-review:<detection/prevention/feedback/automation learning>" \
+  --verify "push-main:<normal push + verified remote HEAD>" \
+  --verify "checkpoint:<context compression checkpoint>"
+
+Only use verification entries for checks that actually ran. In managed repositories, the referenced T-XXX must exist in MASTER_PLAN.md and be DONE; referenced F-XXX IDs must also exist. The completion gate appends the SHA-256 digest of MASTER_PLAN.md so the checkpoint is bound to the reviewed plan revision.
 
 If completion is genuinely impossible without an unavailable secret, external authorization, quota, required physical resource, or a non-inferable irreversible product decision, record a blocker instead:
 %s state block --conversation %q --task-id %q --summary "<exact external blocker>"
 
-Do NOT classify normal build/test/lint failures, missing dev dependencies, coding uncertainty, or recoverable tool errors as blockers. Fix or re-route them. Do not ask the user whether to continue.`, st.TaskID, qexe, st.ConversationID, st.TaskID, qexe, st.ConversationID, st.TaskID)
+Do NOT classify normal build/test/lint failures, missing dev dependencies, coding uncertainty, CI regressions, or recoverable tool errors as blockers. Fix, revert, or re-route them. Do not ask the user whether to continue.`, st.TaskID, engineering.ProcessContract(), qexe, st.ConversationID, st.TaskID, qexe, st.ConversationID, st.TaskID)
 }
 
 func MarkComplete(p paths.Paths, conversation, taskID, summary string, verification []string) error {
@@ -194,6 +240,15 @@ func MarkComplete(p paths.Paths, conversation, taskID, summary string, verificat
 	if len(clean) == 0 {
 		return fmt.Errorf("at least one actual verification item is required")
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve completion fallback workspace: %w", err)
+	}
+	validated, err := engineering.ValidateCompletionForWorkspaces(st.WorkspacePaths, cwd, clean)
+	if err != nil {
+		return err
+	}
+	clean = validated.Verification
 	st.Complete = true
 	st.Verified = true
 	st.HardBlocker = false
