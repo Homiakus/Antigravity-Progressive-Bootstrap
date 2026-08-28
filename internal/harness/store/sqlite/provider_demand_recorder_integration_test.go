@@ -16,15 +16,9 @@ func TestProviderDemandRecorderAtomicallyRecordsAndReplays(t *testing.T) {
 	db := openTestStore(t)
 	now := time.Unix(65000, 0).UTC()
 	seedProviderRuntimeParents(t, db, now)
-	assignment := harnessmodel.ProviderAssignment{
-		ID: "pasn_demand_recorder", AttemptID: testProviderAttemptID, AccountID: testProviderAccountID, ModelID: "model-a",
-		State: harnessmodel.ProviderAssignmentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CreateProviderAssignment(ctx, assignment) }); err != nil {
-		t.Fatal(err)
-	}
+	assignment, reservation := createSettledDemandReservation(t, db, now, "recorder", harnessmodel.QuotaMetricTokens)
 	usage := harnessmodel.ProviderUsageSample{
-		Key: "usage-recorder", AssignmentID: assignment.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
+		Key: "usage-recorder", AssignmentID: assignment.ID, ReservationID: reservation.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
 		Metric: harnessmodel.QuotaMetricTokens, Amount: 77, ObservedAt: now.Add(time.Second), CreatedAt: now.Add(2 * time.Second),
 	}
 	dims := harnessmodel.ProviderDemandDimensions{UsageKey: usage.Key, TaskClass: "code", RepositoryClass: "large", ContextClass: "warm"}
