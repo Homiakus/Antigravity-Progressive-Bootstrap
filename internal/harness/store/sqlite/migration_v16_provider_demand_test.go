@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 )
 
 func TestVersionFifteenToSixteenCreatesProviderDemandHistory(t *testing.T) {
@@ -24,7 +26,12 @@ func TestVersionFifteenToSixteenCreatesProviderDemandHistory(t *testing.T) {
 	if version != SchemaVersion {
 		t.Fatalf("schema version=%d want=%d", version, SchemaVersion)
 	}
-	for _, name := range []string{"provider_demand_dimensions", "provider_demand_dimensions_by_classes_time", "provider_usage_samples_by_model_metric_account"} {
+	for _, name := range []string{
+		"provider_demand_dimensions",
+		"provider_demand_dimensions_require_settled_usage",
+		"provider_demand_dimensions_by_classes_time",
+		"provider_usage_samples_by_model_metric_account",
+	} {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v16 object %s: %v", name, err)
@@ -35,23 +42,19 @@ func TestVersionFifteenToSixteenCreatesProviderDemandHistory(t *testing.T) {
 func TestProviderDemandSchemaRejectsMissingUsageAndInvalidClasses(t *testing.T) {
 	ctx := context.Background()
 	db := openTestStore(t)
-	if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
-VALUES('missing-usage','code','medium','warm',1)`); err == nil {
-		t.Fatal("demand dimensions without usage unexpectedly accepted")
-	}
-
 	now := time.Unix(61000, 0).UTC()
 	seedProviderRuntimeParents(t, db, now)
-	assignmentID := "pasn_v16_schema"
+	assignment, reservation := createSettledDemandReservation(t, db, now, "v16-schema", harnessmodel.QuotaMetricTokens)
+
 	if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_assignments(id, attempt_id, account_id, model_id, state, revision, created_at, updated_at)
-VALUES(?,?,?,'model-a','ACTIVE',1,?,?)`, assignmentID, string(testProviderAttemptID), string(testProviderAccountID), formatTime(now), formatTime(now)); err != nil {
-		t.Fatal(err)
+INSERT INTO provider_demand_dimensions(
+ usage_key, assignment_id, metric, task_class, repository_class, context_class, usage_observed_at_ns
+) VALUES('missing-usage',?,'TOKENS','code','medium','warm',?)`, string(assignment.ID), now.UnixNano()); err == nil {
+		t.Fatal("demand dimensions without settled usage unexpectedly accepted")
 	}
 	if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_usage_samples(sample_key, assignment_id, account_id, model_id, metric, amount, observed_at, created_at)
-VALUES('usage-v16-schema',?,?, 'model-a','TOKENS',1,?,?)`, assignmentID, string(testProviderAccountID), formatTime(now), formatTime(now)); err != nil {
+INSERT INTO provider_usage_samples(sample_key, assignment_id, reservation_id, account_id, model_id, metric, amount, observed_at, created_at)
+VALUES('usage-v16-schema',?,?,?,'model-a','TOKENS',1,?,?)`, string(assignment.ID), string(reservation.ID), string(testProviderAccountID), formatTime(now), formatTime(now)); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -67,8 +70,9 @@ VALUES('usage-v16-schema',?,?, 'model-a','TOKENS',1,?,?)`, assignmentID, string(
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
-VALUES('usage-v16-schema',?,?,?,?)`, tc.task, tc.repo, tc.ctx, now.UnixNano()); err == nil {
+INSERT INTO provider_demand_dimensions(
+ usage_key, assignment_id, metric, task_class, repository_class, context_class, usage_observed_at_ns
+) VALUES('usage-v16-schema',?,'TOKENS',?,?,?,?)`, string(assignment.ID), tc.task, tc.repo, tc.ctx, now.UnixNano()); err == nil {
 				t.Fatalf("invalid demand classes unexpectedly accepted: %+v", tc)
 			}
 		})
