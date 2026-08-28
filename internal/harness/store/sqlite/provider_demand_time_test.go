@@ -14,24 +14,18 @@ func TestProviderDemandHistoryUsesNanosecondHorizonAndOrdering(t *testing.T) {
 	db := openTestStore(t)
 	base := time.Unix(64000, 0).UTC()
 	seedProviderRuntimeParents(t, db, base)
-	assignment := harnessmodel.ProviderAssignment{
-		ID: "pasn_demand_time", AttemptID: testProviderAttemptID, AccountID: testProviderAccountID, ModelID: "model-a",
-		State: harnessmodel.ProviderAssignmentActive, Revision: 1, CreatedAt: base, UpdatedAt: base,
-	}
-	if err := db.Update(ctx, func(tx harnessstore.Tx) error { return tx.CreateProviderAssignment(ctx, assignment) }); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		key  string
 		when time.Time
 	}{
 		{key: "usage-whole-second", when: base},
 		{key: "usage-fractional", when: base.Add(100 * time.Millisecond)},
 	} {
+		assignment, reservation := createSettledDemandReservation(t, db, tc.when.Add(-time.Second), tc.key, harnessmodel.QuotaMetricTokens)
 		if err := db.Update(ctx, func(tx harnessstore.Tx) error {
 			if _, _, err := tx.PutProviderUsageSample(ctx, harnessmodel.ProviderUsageSample{
-				Key: tc.key, AssignmentID: assignment.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
-				Metric: harnessmodel.QuotaMetricTokens, Amount: 1, ObservedAt: tc.when, CreatedAt: tc.when,
+				Key: tc.key, AssignmentID: assignment.ID, ReservationID: reservation.ID, AccountID: assignment.AccountID, ModelID: assignment.ModelID,
+				Metric: harnessmodel.QuotaMetricTokens, Amount: float64(i + 1), ObservedAt: tc.when, CreatedAt: tc.when,
 			}); err != nil {
 				return err
 			}
