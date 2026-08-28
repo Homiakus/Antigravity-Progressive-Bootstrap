@@ -24,7 +24,7 @@ func TestVersionFifteenToSixteenCreatesProviderDemandHistory(t *testing.T) {
 	if version != SchemaVersion {
 		t.Fatalf("schema version=%d want=%d", version, SchemaVersion)
 	}
-	for _, name := range []string{"provider_demand_dimensions", "provider_demand_dimensions_by_classes", "provider_usage_samples_by_model_metric_observed"} {
+	for _, name := range []string{"provider_demand_dimensions", "provider_demand_dimensions_by_classes_time", "provider_usage_samples_by_model_metric_account"} {
 		var got string
 		if err := db.SQLDB().QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE name=?`, name).Scan(&got); err != nil {
 			t.Fatalf("missing v16 object %s: %v", name, err)
@@ -36,8 +36,8 @@ func TestProviderDemandSchemaRejectsMissingUsageAndInvalidClasses(t *testing.T) 
 	ctx := context.Background()
 	db := openTestStore(t)
 	if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class)
-VALUES('missing-usage','code','medium','warm')`); err == nil {
+INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
+VALUES('missing-usage','code','medium','warm',1)`); err == nil {
 		t.Fatal("demand dimensions without usage unexpectedly accepted")
 	}
 
@@ -67,8 +67,8 @@ VALUES('usage-v16-schema',?,?, 'model-a','TOKENS',1,?,?)`, assignmentID, string(
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := db.SQLDB().ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class)
-VALUES('usage-v16-schema',?,?,?)`, tc.task, tc.repo, tc.ctx); err == nil {
+INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
+VALUES('usage-v16-schema',?,?,?,?)`, tc.task, tc.repo, tc.ctx, now.UnixNano()); err == nil {
 				t.Fatalf("invalid demand classes unexpectedly accepted: %+v", tc)
 			}
 		})
