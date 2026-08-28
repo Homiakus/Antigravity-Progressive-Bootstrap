@@ -47,13 +47,16 @@ func ParseLatestPlanCheckpoint(plan string) (PlanCheckpoint, error) {
 	cp := PlanCheckpoint{Heading: strings.TrimSpace(lines[start]), Fields: map[string]string{}}
 	for _, line := range lines[start+1 : end] {
 		trimmed := strings.TrimSpace(line)
-		trimmed = strings.Trim(trimmed, "`")
+		// Repository checkpoints conventionally render the field label as inline
+		// code (`FIELD:`) followed by ordinary Markdown value text. Strip markup
+		// before splitting so the closing backtick cannot become part of the key.
+		trimmed = strings.ReplaceAll(trimmed, "`", "")
 		idx := strings.Index(trimmed, ":")
 		if idx <= 0 {
 			continue
 		}
 		key := strings.ToUpper(strings.TrimSpace(trimmed[:idx]))
-		value := strings.TrimSpace(strings.TrimSuffix(trimmed[idx+1:], "`"))
+		value := strings.TrimSpace(trimmed[idx+1:])
 		if key != "" && value != "" {
 			cp.Fields[key] = value
 		}
