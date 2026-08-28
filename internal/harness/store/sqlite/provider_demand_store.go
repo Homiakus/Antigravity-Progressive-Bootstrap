@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
@@ -35,13 +36,24 @@ func (t *transaction) PutProviderDemandDimensions(ctx context.Context, d harness
 	if usage.ModelID == "" {
 		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand dimensions require authoritative usage model id: %w", harnessstore.ErrConflict)
 	}
+	if usage.ReservationID == "" {
+		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand dimensions require settled reservation-backed usage: %w", harnessstore.ErrConflict)
+	}
+	reservation, err := t.GetProviderReservation(ctx, usage.ReservationID)
+	if err != nil {
+		return harnessmodel.ProviderDemandDimensions{}, false, err
+	}
+	if reservation.State != harnessmodel.ProviderReservationSettled {
+		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand reservation %s is %s, want SETTLED: %w", reservation.ID, reservation.State, harnessstore.ErrConflict)
+	}
 	observedNS, err := checkedUnixNano(usage.ObservedAt)
 	if err != nil {
 		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand observation time is outside durable range: %w", err)
 	}
 	res, err := t.tx.ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
-VALUES(?,?,?,?,?) ON CONFLICT(usage_key) DO NOTHING`, d.UsageKey, d.TaskClass, d.RepositoryClass, d.ContextClass, observedNS)
+INSERT INTO provider_demand_dimensions(
+    usage_key, assignment_id, metric, task_class, repository_class, context_class, usage_observed_at_ns
+) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, d.UsageKey, string(usage.AssignmentID), string(usage.Metric), d.TaskClass, d.RepositoryClass, d.ContextClass, observedNS)
 	if err != nil {
 		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("insert provider demand dimensions %q: %w", d.UsageKey, err)
 	}
@@ -53,13 +65,21 @@ VALUES(?,?,?,?,?) ON CONFLICT(usage_key) DO NOTHING`, d.UsageKey, d.TaskClass, d
 		return d, true, nil
 	}
 	existing, err := t.GetProviderDemandDimensions(ctx, d.UsageKey)
-	if err != nil {
+	if err == nil {
+		if existing != d {
+			return existing, false, fmt.Errorf("provider demand usage key %q was replayed with different dimensions: %w", d.UsageKey, harnessstore.ErrConflict)
+		}
+		return existing, false, nil
+	}
+	if !errors.Is(err, harnessstore.ErrNotFound) {
 		return harnessmodel.ProviderDemandDimensions{}, false, err
 	}
-	if existing != d {
-		return existing, false, fmt.Errorf("provider demand usage key %q was replayed with different dimensions: %w", d.UsageKey, harnessstore.ErrConflict)
+	var existingUsageKey string
+	if err := t.tx.QueryRowContext(ctx, `
+SELECT usage_key FROM provider_demand_dimensions WHERE assignment_id=? AND metric=?`, string(usage.AssignmentID), string(usage.Metric)).Scan(&existingUsageKey); err != nil {
+		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("resolve canonical provider demand conflict: %w", err)
 	}
-	return existing, false, nil
+	return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider assignment %s metric %s already has canonical demand sample %q: %w", usage.AssignmentID, usage.Metric, existingUsageKey, harnessstore.ErrConflict)
 }
 
 func (t *transaction) ListProviderDemandHistory(ctx context.Context, q harnessmodel.ProviderDemandHistoryQuery) ([]harnessmodel.ProviderDemandSample, error) {
