@@ -20,8 +20,15 @@ func TestVersionThirteenToFourteenCreatesProviderObservationSchema(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 14 {
-		t.Fatalf("schema version=%d want=14", version)
+	if version != SchemaVersion {
+		t.Fatalf("schema version=%d want current=%d", version, SchemaVersion)
+	}
+	var applied int
+	if err := db.SQLDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=14 AND name='provider_observation'`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 1 {
+		t.Fatalf("v14 provider_observation migration rows=%d want=1", applied)
 	}
 	for _, table := range []string{
 		"provider_accounts",
