@@ -21,9 +21,9 @@ Provider-control-plane foundation completed through T-004:
 - T-001 provider-domain primitives: `bf060a70833504fc5dc979181d59453276a56e0c`.
 - T-002 observation adapter/registry: `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 SQLite v14 provider-observation schema: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
-- T-004 durable provider observation Store/SQLite implementation: verified on validation head; publication to `main` is this iteration's final action.
+- T-004 durable provider observation Store/SQLite implementation: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 
-Next highest-leverage work after T-004 is live Antigravity/Codex observation ingestion (T-006/T-007), while T-005 v15 assignment/reservation persistence is also unblocked.
+Next highest-leverage work is live Antigravity/Codex observation ingestion (T-006/T-007), while T-005 v15 assignment/reservation persistence is also unblocked.
 
 ## 3. Architecture Map
 
@@ -70,15 +70,11 @@ Harness CI enforces module tidiness, bridge syntax/contracts, `go test ./...`, `
 
 Persistence is SQLite schema v14. Migrations 1..13 are immutable checksummed releases; v14 is append-only provider observation schema.
 
-T-004 implementation verification on head `2b1fa2fe549cf86b854b15cb2fdf584bbf3b06ec`:
+T-004 verification:
 
-- module graph tidy: PASS;
-- bridge syntax/contracts: PASS;
-- unit/integration: PASS;
-- race detector: PASS;
-- vet: PASS;
-- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
-- Windows tests: PASS.
+- implementation head `2b1fa2fe549cf86b854b15cb2fdf584bbf3b06ec`: full Linux/Windows Harness CI PASS;
+- reconciled head `f2e784cadd9ae0d0290d91465818819533f9a65c`: full Linux/Windows Harness CI PASS;
+- published atomic tree: `7f6c3a888318e1cca1ea2d22c8c997051f883856`, fast-forward to `main`, no force.
 
 ## 5. System Invariants
 
@@ -158,7 +154,7 @@ Every publication must re-read `main`, reconcile semantics and fast-forward only
 
 ### F-015 — Delayed provider observations can regress durable state
 **Status:** Resolved in T-004. **Severity:** High. **Confidence:** Confirmed.  
-Reconnect/rolling updates may arrive out of order. Account `updated_at` and model/session `observed_at` now enforce monotonic upserts; stale writes return conflict. Session IDs are fenced to their original account.
+Reconnect/rolling updates may arrive out of order. Account `updated_at` and model/session `observed_at` enforce monotonic upserts; stale writes return conflict. Session IDs are fenced to their original account.
 
 ## 7. Risk Register
 
@@ -227,8 +223,8 @@ Commit `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 Files: `internal/harness/store/store.go`, `internal/harness/store/sqlite/provider_store.go`, provider store tests.  
 Implemented account/model/session upsert/read/list, atomic capacity snapshot+window append, deterministic latest capacity reconstruction, provider/account identity checks, monotonic stale-update rejection and WAL concurrent readers.  
 Tests: roundtrip, provider/state filtering, model/session reconstruction, latest ordering, atomic rollback, provider mismatch, stale account/model/session conflict, session-account immutability, concurrent readers/writer.  
-Verification: full Harness CI PASS on implementation head `2b1fa2fe549cf86b854b15cb2fdf584bbf3b06ec`.  
-Non-goal preserved: no scheduler/routing/provider-protocol behavior.
+Commit: `7f6c3a888318e1cca1ea2d22c8c997051f883856`.  
+Push: `main`, fast-forward, no force.
 
 ### T-005 — Persist assignments/reservations/usage/circuit state in SQLite v15
 **Status:** READY. **Priority:** P0.  
@@ -236,7 +232,7 @@ Add `provider_assignments`, `provider_reservations`, `provider_usage_samples`, `
 
 ### T-006 — Implement Antigravity observation adapter
 **Status:** READY. **Priority:** P0. **Leverage:** HIGH.  
-Normalize supported status/headless signals into provider-neutral account/model/quota/session observations. Preserve native bucket IDs/timestamps; no UI-pixel scraping. Deterministic fixtures for missing/unknown/malformed fields. Dependencies: T-002,T-004.
+Normalize supported status-line/headless signals into provider-neutral account/model/quota/session observations. Preserve native bucket IDs/timestamps; no UI-pixel scraping. Deterministic fixtures for missing/unknown/malformed fields. Dependencies: T-002,T-004.
 
 ### T-007 — Implement Codex App Server observation adapter
 **Status:** READY. **Priority:** P0. **Leverage:** HIGH.  
@@ -322,7 +318,7 @@ Observation persistence additionally requires atomicity, stale-ordering, identit
 
 ## 13. Mutation Testing Strategy
 
-Mandatory once executable routing policy exists: quota `<`/`<=`, reservation subtraction, stale-plan bypass, replay branch inversion, `IN_DOUBT` bypass, circuit transitions, settlement idempotency and commit-fencing. T-004 is persistence plumbing; mutation becomes mandatory starting with T-011 policy logic.
+Mandatory once executable routing policy exists: quota `<`/`<=`, reservation subtraction, stale-plan bypass, replay branch inversion, `IN_DOUBT` bypass, circuit transitions, settlement idempotency and commit-fencing. Mutation becomes mandatory starting with T-011 policy logic.
 
 ## 14. Performance Baselines
 
@@ -359,7 +355,7 @@ ML demand prediction, distributed credential vault, provider marketplace ABI, mo
 - T-001 DONE — `bf060a70833504fc5dc979181d59453276a56e0c`.
 - T-002 DONE — `ac35b5193c735897a75cb056680215a4e3aae428`.
 - T-003 DONE — `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
-- T-004 DONE on verified validation tree; final atomic `main` SHA will be recorded after fast-forward publication.
+- T-004 DONE — `7f6c3a888318e1cca1ea2d22c8c997051f883856`.
 
 ## 20. Iteration Log
 
@@ -376,10 +372,11 @@ SQLite v14 observation schema; F-014 remote-main movement recorded. Full Harness
 **Findings addressed:** F-003 durable observation boundary; F-015 stale delivery.  
 **Changes:** Store contracts + SQLite account/model/session persistence, atomic capacity snapshots/windows, deterministic latest query, monotonic observation guards, session account fencing.  
 **Tests:** roundtrip/filter/latest/rollback/provider mismatch/stale update/session identity/WAL concurrency.  
-**Verification:** full Harness CI PASS on implementation head `2b1fa2fe549cf86b854b15cb2fdf584bbf3b06ec`; plan reconciliation is documentation-only and receives final CI before publication.  
+**Verification:** full Harness CI PASS on implementation and reconciled heads.  
 **Plan changes:** F-015 added/resolved; I-014/I-015 added; T-004 DONE; T-005/T-006/T-007 READY.  
-**Commit/Push:** pending final atomic fast-forward to `main`.  
-**Result:** VERIFYING.
+**Commit:** `7f6c3a888318e1cca1ea2d22c8c997051f883856`.  
+**Push:** `main`, fast-forward, no force.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
