@@ -78,6 +78,16 @@ type Reader interface {
 	ListProviderModels(context.Context, harnessmodel.ProviderAccountID) ([]harnessmodel.ProviderModelDescriptor, error)
 	GetLatestProviderCapacity(context.Context, harnessmodel.ProviderAccountID) (harnessmodel.ProviderCapacitySnapshot, error)
 	ListProviderSessions(context.Context, harnessmodel.ProviderAccountID) ([]harnessmodel.ProviderSessionSnapshot, error)
+	GetProviderAssignment(context.Context, harnessmodel.ProviderAssignmentID) (harnessmodel.ProviderAssignment, error)
+	GetActiveProviderAssignment(context.Context, harnessmodel.AttemptID) (harnessmodel.ProviderAssignment, error)
+	ListProviderAssignmentsByAttempt(context.Context, harnessmodel.AttemptID) ([]harnessmodel.ProviderAssignment, error)
+	GetProviderReservation(context.Context, harnessmodel.ProviderReservationID) (harnessmodel.ProviderReservation, error)
+	ListProviderReservationsByAssignment(context.Context, harnessmodel.ProviderAssignmentID) ([]harnessmodel.ProviderReservation, error)
+	ListActiveProviderReservations(context.Context, harnessmodel.ProviderAccountID, time.Time, int) ([]harnessmodel.ProviderReservation, error)
+	ListDueProviderReservationExpirations(context.Context, time.Time, int) ([]harnessmodel.ProviderReservation, error)
+	GetProviderUsageSample(context.Context, string) (harnessmodel.ProviderUsageSample, error)
+	ListProviderUsageSamplesByAssignment(context.Context, harnessmodel.ProviderAssignmentID, int) ([]harnessmodel.ProviderUsageSample, error)
+	GetProviderCircuitState(context.Context, harnessmodel.ProviderAccountID, harnessmodel.ProviderModelID) (harnessmodel.ProviderCircuitState, error)
 	ListEvents(context.Context, harnessmodel.WorkflowRunID, int64, int) ([]events.Event, error)
 }
 
@@ -136,6 +146,13 @@ type Tx interface {
 	UpsertProviderModel(context.Context, harnessmodel.ProviderModelDescriptor, time.Time) error
 	AppendProviderCapacity(context.Context, harnessmodel.ProviderCapacitySnapshot) error
 	UpsertProviderSession(context.Context, harnessmodel.ProviderSessionSnapshot, time.Time) error
+	CreateProviderAssignment(context.Context, harnessmodel.ProviderAssignment) error
+	CompareAndSwapProviderAssignment(context.Context, uint64, harnessmodel.ProviderAssignment) error
+	CreateProviderReservation(context.Context, harnessmodel.ProviderReservation) error
+	CompareAndSwapProviderReservation(context.Context, uint64, harnessmodel.ProviderReservation) error
+	PutProviderUsageSample(context.Context, harnessmodel.ProviderUsageSample) (harnessmodel.ProviderUsageSample, bool, error)
+	CreateProviderCircuitState(context.Context, harnessmodel.ProviderCircuitState) error
+	CompareAndSwapProviderCircuitState(context.Context, uint64, harnessmodel.ProviderCircuitState) error
 	AddWorkflowNode(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeSpec) error
 	AddWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
 	RemoveWorkflowDependency(context.Context, harnessmodel.WorkflowDefinitionID, int, harnessmodel.NodeID, harnessmodel.NodeID) error
