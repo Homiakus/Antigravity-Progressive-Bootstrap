@@ -15,6 +15,7 @@ type InstanceID string
 type WorkspaceID string
 type ConversationID string
 type RemoteSessionID string
+type RemoteSessionRequestID string
 type TelegramBindingID string
 type RemoteCommandID string
 type RemoteEventID string
@@ -23,13 +24,14 @@ type HostID string
 type IDKind string
 
 const (
-	IDRepository      IDKind = "rep"
-	IDWorkspace       IDKind = "rws"
-	IDConversation    IDKind = "rcv"
-	IDRemoteSession   IDKind = "rsi"
-	IDTelegramBinding IDKind = "tgb"
-	IDRemoteCommand   IDKind = "rcm"
-	IDRemoteEvent     IDKind = "rev"
+	IDRepository           IDKind = "rep"
+	IDWorkspace            IDKind = "rws"
+	IDConversation         IDKind = "rcv"
+	IDRemoteSession        IDKind = "rsi"
+	IDRemoteSessionRequest IDKind = "rsq"
+	IDTelegramBinding      IDKind = "tgb"
+	IDRemoteCommand        IDKind = "rcm"
+	IDRemoteEvent          IDKind = "rev"
 )
 
 var generatedIDRE = regexp.MustCompile(`^[a-z]{3}_[0-9]{13}_[0-9a-f]{20}$`)
@@ -78,7 +80,7 @@ func ValidateGeneratedID(id string, kind IDKind) error {
 
 func validIDKind(kind IDKind) bool {
 	switch kind {
-	case IDRepository, IDWorkspace, IDConversation, IDRemoteSession, IDTelegramBinding, IDRemoteCommand, IDRemoteEvent:
+	case IDRepository, IDWorkspace, IDConversation, IDRemoteSession, IDRemoteSessionRequest, IDTelegramBinding, IDRemoteCommand, IDRemoteEvent:
 		return true
 	default:
 		return false
