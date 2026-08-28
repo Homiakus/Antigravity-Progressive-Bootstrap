@@ -38,6 +38,7 @@ type SessionStore interface {
 	CreateSession(context.Context, model.RemoteSession) error
 	GetSession(context.Context, model.RemoteSessionID) (model.RemoteSession, error)
 	UpdateSessionStates(context.Context, model.RemoteSessionID, model.SessionDesiredState, model.SessionObservedState, time.Time) error
+	UpdateSessionAccount(context.Context, model.RemoteSessionID, string, time.Time) error
 	ListSessionsByInstance(context.Context, model.InstanceID, bool) ([]model.RemoteSession, error)
 }
 
