@@ -6,13 +6,20 @@ import (
 )
 
 var checkpointRequiredFields = []string{
+	"CURRENT HEAD",
 	"CURRENT QUALIFIED MILESTONE",
+	"ARCHITECTURE",
 	"CRITICAL INVARIANTS",
 	"COMPLETED THIS ITERATION",
+	"RESOLVED FINDINGS",
+	"OPEN CRITICAL/HIGH FINDINGS",
+	"BLOCKERS",
 	"NEXT TASK",
 	"WHY NEXT",
+	"CRITICAL FILES",
 	"VERIFICATION COMMANDS",
 	"IMPORTANT DECISIONS",
+	"REJECTED OPTIONS",
 	"NEW PROCESS LEARNING",
 }
 
@@ -65,7 +72,7 @@ func ParseLatestPlanCheckpoint(plan string) (PlanCheckpoint, error) {
 }
 
 // ValidatePlanCheckpoint proves that the latest repository-resident checkpoint
-// is usable to resume after the task being completed.
+// contains the complete recovery state and belongs to the task being completed.
 func ValidatePlanCheckpoint(plan, taskID string) error {
 	cp, err := ParseLatestPlanCheckpoint(plan)
 	if err != nil {
