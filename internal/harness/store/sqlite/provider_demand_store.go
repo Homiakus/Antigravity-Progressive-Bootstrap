@@ -35,9 +35,13 @@ func (t *transaction) PutProviderDemandDimensions(ctx context.Context, d harness
 	if usage.ModelID == "" {
 		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand dimensions require authoritative usage model id: %w", harnessstore.ErrConflict)
 	}
+	observedNS, err := checkedUnixNano(usage.ObservedAt)
+	if err != nil {
+		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("provider demand observation time is outside durable range: %w", err)
+	}
 	res, err := t.tx.ExecContext(ctx, `
-INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class)
-VALUES(?,?,?,?) ON CONFLICT(usage_key) DO NOTHING`, d.UsageKey, d.TaskClass, d.RepositoryClass, d.ContextClass)
+INSERT INTO provider_demand_dimensions(usage_key, task_class, repository_class, context_class, usage_observed_at_ns)
+VALUES(?,?,?,?,?) ON CONFLICT(usage_key) DO NOTHING`, d.UsageKey, d.TaskClass, d.RepositoryClass, d.ContextClass, observedNS)
 	if err != nil {
 		return harnessmodel.ProviderDemandDimensions{}, false, fmt.Errorf("insert provider demand dimensions %q: %w", d.UsageKey, err)
 	}
@@ -62,18 +66,22 @@ func (t *transaction) ListProviderDemandHistory(ctx context.Context, q harnessmo
 	if err := q.Validate(); err != nil {
 		return nil, err
 	}
+	sinceNS, err := checkedUnixNano(q.Since)
+	if err != nil {
+		return nil, fmt.Errorf("provider demand history since is outside durable range: %w", err)
+	}
 	rows, err := t.tx.QueryContext(ctx, `
 SELECT u.sample_key, u.account_id, a.provider, u.model_id, u.metric, u.amount,
        d.task_class, d.repository_class, d.context_class, u.observed_at
 FROM provider_demand_dimensions d
 JOIN provider_usage_samples u ON u.sample_key=d.usage_key
 JOIN provider_accounts a ON a.id=u.account_id
-WHERE a.provider=? AND u.model_id=? AND u.metric=? AND u.observed_at>=?
+WHERE a.provider=? AND u.model_id=? AND u.metric=? AND d.usage_observed_at_ns>=?
   AND (?='' OR d.task_class=?)
   AND (?='' OR d.repository_class=?)
   AND (?='' OR d.context_class=?)
-ORDER BY u.observed_at DESC, u.sample_key DESC
-LIMIT ?`, string(q.Provider), string(q.ModelID), string(q.Metric), formatTime(q.Since),
+ORDER BY d.usage_observed_at_ns DESC, u.sample_key DESC
+LIMIT ?`, string(q.Provider), string(q.ModelID), string(q.Metric), sinceNS,
 		q.TaskClass, q.TaskClass, q.RepositoryClass, q.RepositoryClass, q.ContextClass, q.ContextClass, q.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("list provider demand history: %w", err)
@@ -91,7 +99,6 @@ LIMIT ?`, string(q.Provider), string(q.ModelID), string(q.Metric), formatTime(q.
 		s.Provider = harnessmodel.ProviderKind(provider)
 		s.ModelID = harnessmodel.ProviderModelID(modelID)
 		s.Metric = harnessmodel.QuotaMetricKind(metric)
-		var err error
 		if s.ObservedAt, err = parseTime(observedAt); err != nil {
 			return nil, fmt.Errorf("parse provider demand observed_at: %w", err)
 		}
