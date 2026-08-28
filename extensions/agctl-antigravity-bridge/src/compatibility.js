@@ -8,9 +8,10 @@ const COMMANDS = {
 };
 
 class AntigravityCompatibility {
-  constructor() {
+  constructor(eventSource = null) {
     this._dispatch = Promise.resolve();
     this._commands = new Set();
+    this._eventSource = eventSource;
   }
 
   async initialize() {
@@ -31,7 +32,7 @@ class AntigravityCompatibility {
       conversationSend,
       conversationDirectSend: false,
       messageHistory: false,
-      agentEvents: false,
+      agentEvents: Boolean(this._eventSource && this._eventSource.ready),
       cancel: false,
       approvalEvents: false,
       approvalDecision: false,
@@ -86,6 +87,11 @@ class AntigravityCompatibility {
     });
     this._dispatch = operation.catch(() => {});
     return operation;
+  }
+
+  async listEvents(id, after) {
+    if (!this._eventSource || !this._eventSource.ready) throw new Error('agent events unsupported');
+    return this._eventSource.listEvents(id, after);
   }
 }
 

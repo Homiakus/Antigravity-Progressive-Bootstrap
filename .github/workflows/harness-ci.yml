@@ -21,10 +21,22 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Verify module graph is tidy
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
+
+      - name: Bridge JavaScript syntax
+        run: |
+          for file in extensions/agctl-antigravity-bridge/src/*.js; do node --check "$file"; done
+
+      - name: Bridge contract tests
+        run: node --test extensions/agctl-antigravity-bridge/test/*.test.js
 
       - name: Unit and integration tests
         run: go test ./...
@@ -62,6 +74,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Bridge JavaScript syntax
+        shell: pwsh
+        run: Get-ChildItem extensions/agctl-antigravity-bridge/src/*.js | ForEach-Object { node --check $_.FullName }
+
+      - name: Bridge contract tests
+        run: node --test extensions/agctl-antigravity-bridge/test/*.test.js
 
       - name: Windows tests
         run: go test ./...
