@@ -18,11 +18,11 @@ The existing durable harness is the foundation, not a rewrite target. It already
 
 Provider-control-plane foundation now completed:
 
-- T-001 provider-domain primitives are on `main` as `bf060a70833504fc5dc979181d59453276a56e0c`.
-- T-002 observation adapter/registry is on `main` as `ac35b5193c735897a75cb056680215a4e3aae428`.
-- T-003 SQLite v14 provider-observation schema is implemented and fully verified on the validation branch; publication to `main` is the current iteration's final action.
+- T-001 provider-domain primitives: `bf060a70833504fc5dc979181d59453276a56e0c`.
+- T-002 observation adapter/registry: `ac35b5193c735897a75cb056680215a4e3aae428`.
+- T-003 SQLite v14 provider-observation schema: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.
 
-Current missing layer after T-003: durable provider observation Store contracts and read/write implementation, followed by real Antigravity/Codex observation adapters and quota-aware selection.
+Current next task: T-004 durable provider observation Store contracts/read-write implementation, followed by real Antigravity/Codex observation adapters and quota-aware selection.
 
 ## 3. Architecture Map
 
@@ -86,15 +86,11 @@ Repository CI (`.github/workflows/harness-ci.yml`) enforces module tidiness, JS 
 
 Persistence baseline before provider work was SQLite schema v13 with immutable checksummed migrations. T-003 appends v14 only; migrations 1..13 remain byte-identical.
 
-T-003 verification on head `852de9ef606ea358b1235a02c3886a9bab2c1b95`:
+T-003 verification:
 
-- module graph tidy: PASS;
-- bridge syntax/contracts: PASS;
-- unit/integration: PASS;
-- race detector: PASS;
-- vet: PASS;
-- compiler/store/scheduler/retry/wait smoke benchmarks: PASS;
-- Windows tests: PASS.
+- implementation head `852de9ef606ea358b1235a02c3886a9bab2c1b95`: full Linux/Windows Harness CI PASS;
+- reconciled tree head `8223ed4bcea2b5104bba98559f6248dbe4e25447`: Linux quality PASS; code is tree-identical to the implementation head except `MASTER_PLAN.md`;
+- published atomic tree: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`, fast-forward to `main`, no force.
 
 ## 5. System Invariants
 
@@ -169,8 +165,8 @@ T-003 appends v14 in a new migration file and changes only `SchemaVersion 13 -> 
 ### F-014 — Concurrent autonomous work can move `main` during an iteration
 **Status:** Planned. **Severity:** High. **Confidence:** Confirmed.  
 **Evidence:** while a validation branch was based on `2c10ec8`, `main` advanced through T-001/T-002 to `ac35b51`; an obsolete validation branch became diverged.  
-**Impact:** validates the need for mandatory pre-push ref recheck, semantic reconciliation, fast-forward-only publication and ultimately T-018/T-019 Commit Coordinator fencing.  
-**Decision:** obsolete duplicate validation work is not merged; current tasks must always re-read `main` immediately before publication.
+**Impact:** validates mandatory pre-push ref recheck, semantic reconciliation, fast-forward-only publication and T-018/T-019 Commit Coordinator fencing.  
+**Decision:** obsolete duplicate validation work is never merged; every task re-reads `main` immediately before publication.
 
 ## 7. Risk Register
 
@@ -198,7 +194,7 @@ Highest leverage remaining sequence: durable observations -> Antigravity/Codex a
 T001 provider primitives DONE
   -> T002 observation adapter/registry DONE
   -> T003 SQLite v14 observations DONE
-      -> T004 observation store
+      -> T004 observation store READY
           -> T006 Antigravity adapter
           -> T007 Codex adapter
           -> T008 session broker
@@ -250,8 +246,9 @@ Portable execution remains deferred to T-013/T-014.
 Files: `internal/harness/store/sqlite/migration_v14_provider_observation.go`, `migration_v14_provider_observation_test.go`, `migrations.go`.  
 Implementation: append v14 tables `provider_accounts`, `provider_models`, `provider_capacity_snapshots`, `provider_quota_windows`, `provider_sessions`; retain provider-native quota window identity/metric/confidence and permit session observation before model-catalog refresh.  
 Tests: v13->v14 upgrade, table/index existence, FK rejection, quota fraction bound, session context bound, out-of-order session/model observation; existing fresh DB/replay/checksum suite remains applicable.  
-Verification: full Linux/Windows Harness CI PASS on pre-plan-reconciliation head `852de9ef606ea358b1235a02c3886a9bab2c1b95`.  
-Acceptance: no scheduler/execution behavior changes; v1..v13 untouched; v14 is append-only.  
+Verification: full Linux/Windows Harness CI PASS on implementation head; reconciled tree passed Linux quality; publication is tree-identical except commit metadata.  
+Commit: `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.  
+Push: `main`, fast-forward, no force.  
 Dependencies: T-001.
 
 ### T-004 — Add provider observation store contracts
@@ -358,7 +355,7 @@ For schema tasks specifically: fresh DB + previous-version upgrade + FK/CHECK ne
 
 Mandatory mutation targets once critical executable policy exists: quota `<`/`<=`, omitted reservation subtraction, stale observation acceptance, plan-digest bypass, replay-safe branch inversion, `IN_DOUBT` bypass, circuit OPEN/HALF_OPEN changes, settlement idempotency and commit-fencing bypass. A surviving mutant becomes a finding if contract ambiguity caused it.
 
-T-003 is schema-only; mutation tooling is not required for this iteration because behavior is enforced by SQLite constraints plus negative migration tests. The quota-selection and state-machine mutation requirement begins with T-011.
+T-003 is schema-only; mutation tooling is not required for that iteration because behavior is enforced by SQLite constraints plus negative migration tests. The quota-selection and state-machine mutation requirement begins with T-011.
 
 ## 14. Performance Baselines
 
@@ -393,7 +390,7 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 
 - **T-001:** DONE, `bf060a70833504fc5dc979181d59453276a56e0c`, full Harness CI PASS.
 - **T-002:** DONE, `ac35b5193c735897a75cb056680215a4e3aae428`, full Harness CI PASS.
-- **T-003:** DONE on validation head; full Harness CI PASS; final fast-forward publication pending this plan reconciliation commit.
+- **T-003:** DONE, `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`, fast-forward published to `main` after verified validation tree.
 
 ## 20. Iteration Log
 
@@ -421,11 +418,17 @@ Until evidence justifies it: ML/LLM demand predictor, distributed credential vau
 **Findings addressed:** F-003 persistence foundation, F-012 migration immutability.  
 **Unexpected findings:** F-014 concurrent `main` movement during autonomous work.  
 **Changes:** SQLite schema v14 for provider accounts, models, capacity snapshots, native quota windows and sessions; schema bounds/FK constraints; v13->v14 tests.  
-**Tests:** full Harness CI PASS on implementation head `852de9ef606ea358b1235a02c3886a9bab2c1b95`; plan-only reconciliation commit must receive the same CI before publication.  
-**Plan changes:** T-003 DONE; T-004 READY; explicit remote-main movement risk and reconciliation invariant added.  
-**Commit:** pending final plan reconciliation head.  
-**Push:** pending fast-forward to main after final CI and main-ref recheck.  
-**Result:** VERIFYING.
+**Tests:** implementation head full Linux/Windows Harness CI PASS; reconciled tree Linux quality PASS; final published commit uses the verified tree.  
+**Plan changes:** T-003 DONE; T-004 READY; remote-main movement risk and reconciliation invariant added.  
+**Commit:** `c5c2ebfab1814207aecb274ffb14b5ae83d9992f`.  
+**Push:** `main`, fast-forward, no force.  
+**Result:** PASS.
+
+### Iteration 3A — Post-push plan checkpoint
+**Task:** planning reconciliation only.  
+**Changes:** record exact T-003 publication SHA and promote T-004 to current READY task.  
+**Code:** unchanged from verified T-003 tree.  
+**Result:** PASS.
 
 ## 21. Definition of Final Done
 
