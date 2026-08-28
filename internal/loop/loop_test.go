@@ -95,6 +95,29 @@ func TestCompleteRequiresEvidence(t *testing.T) {
 	}
 }
 
+func TestPersistedWorkspaceOverridesAmbientCWD(t *testing.T) {
+	p := testPaths(t)
+	managedAmbient := t.TempDir()
+	if err := os.WriteFile(filepath.Join(managedAmbient, engineering.PlanFileName), []byte("# ambient plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, managedAmbient)
+	unmanagedWorkspace := t.TempDir()
+	st, err := EnsureTaskState(p, model.PreInvocationInput{
+		CommonHookInput: model.CommonHookInput{ConversationID: "workspace-bound", WorkspacePaths: []string{unmanagedWorkspace}},
+		InitialNumSteps: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.WorkspacePaths) != 1 || st.WorkspacePaths[0] != unmanagedWorkspace {
+		t.Fatalf("workspace identity was not persisted: %+v", st.WorkspacePaths)
+	}
+	if err := MarkComplete(p, "workspace-bound", st.TaskID, "done", []string{"synthetic verification"}); err != nil {
+		t.Fatalf("ambient cwd leaked into completion policy: %v", err)
+	}
+}
+
 func TestCompletionInjectionIncludesLivingPlanProtocol(t *testing.T) {
 	msg := CompletionInjection("agctl", model.TaskState{ConversationID: "c", TaskID: "generated-task"})
 	for _, want := range []string{
@@ -119,7 +142,7 @@ func TestManagedCompletionStoresPlanDigest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, engineering.PlanFileName), []byte(plan), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed"}, InitialNumSteps: 1})
+	st, err := EnsureTaskState(p, model.PreInvocationInput{CommonHookInput: model.CommonHookInput{ConversationID: "managed", WorkspacePaths: []string{workspace}}, InitialNumSteps: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
