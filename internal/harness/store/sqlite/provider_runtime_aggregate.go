@@ -10,6 +10,8 @@ import (
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
 
+var _ harnessstore.ActiveProviderReservationAggregator = (*transaction)(nil)
+
 func (t *transaction) ListActiveProviderReservationTotalsByWindow(
 	ctx context.Context,
 	accountID harnessmodel.ProviderAccountID,
@@ -19,6 +21,10 @@ func (t *transaction) ListActiveProviderReservationTotalsByWindow(
 	if accountID == "" || windowID == "" || activeAt.IsZero() {
 		return nil, fmt.Errorf("provider reservation aggregate account, window and activeAt are required")
 	}
+	activeAtNS, err := checkedUnixNano(activeAt)
+	if err != nil {
+		return nil, fmt.Errorf("invalid provider reservation aggregate active time: %w", err)
+	}
 	rows, err := t.tx.QueryContext(ctx, `
 SELECT model_id, metric, SUM(amount), COUNT(*)
 FROM provider_reservations
@@ -27,7 +33,7 @@ WHERE account_id=?
   AND expires_at_ns>?
   AND window_id=?
 GROUP BY model_id, metric
-ORDER BY model_id, metric`, string(accountID), activeAt.UTC().UnixNano(), windowID)
+ORDER BY model_id, metric`, string(accountID), activeAtNS, windowID)
 	if err != nil {
 		return nil, fmt.Errorf("query active provider reservation totals: %w", err)
 	}
