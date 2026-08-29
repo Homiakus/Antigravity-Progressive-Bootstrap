@@ -20,7 +20,7 @@ Current qualified milestones:
 - T-029 makes publication/checkpoint evidence machine-verifiable; published as `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 - T-010 conservative native-unit demand estimation is published as `9d327e7e530eb940021c7a3dce11b9f33944d53f`.
 - T-011 atomic provider reservations are published as `75651581908af7eb3b9b4148106fa142e5707bd9`; Linux/Windows CI, race, vet and reservation smoke gates passed on the published tree.
-- T-008 session/context brokering is technically qualified on publication-lineage code commit `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`, preceded by durable pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`. Reconciled publication is the current final action. T-012 is the next product-path task once this exact lineage is published.
+- T-008 session/context brokering is published in `main` through reconciled commit `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`, with durable pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c` and implementation commit `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`. T-012 is now fully unblocked and is the next P0 product-path task.
 
 ## 2. Architecture
 
@@ -146,7 +146,7 @@ Affects T-013/T-014.
 Affects T-013/T-014/T-016.
 
 ### F-010 — No session/context broker
-**Status:** Resolved in qualified T-008; publication pending. **Severity:** Medium. **Confidence:** Confirmed.  
+**Status:** Resolved and published in T-008. **Severity:** Medium. **Confidence:** Confirmed.  
 Provider-neutral `REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE` policy now uses authoritative account/model/session/context/workspace data and configured hysteresis.
 
 ### F-011 — Provider routing decisions are not fully explainable
@@ -253,7 +253,7 @@ T001 DONE -> T002 DONE -> T003 DONE -> T004 DONE
                                       |-> T006 DONE
                                       |-> T007 DONE
                                       |-> T005 DONE
-T004,T006,T007 -> T008 VERIFIED/PUBLISHING
+T004,T006,T007 -> T008 DONE
 T004,T006,T007 -> T009 DONE
 T005,T009 -> T010 DONE -> T011 DONE
 T008,T011 -------------------------> T012 READY/NEXT
@@ -272,7 +272,7 @@ T029 complements, but does not replace, T018/T019.
 
 Priority after T-008 publication:
 
-1. **T-012 P0 / NEXT** — explainable shadow selector; all prerequisites are now implemented/qualified.
+1. **T-012 P0 / NEXT** — explainable shadow selector; all prerequisites are now published and complete.
 2. **T-030 P1** — structural plan/process audit and enforcement of durable task-start ordering.
 3. **T-013 P0 / BLOCKED ON T-012** — TaskEnvelope and plan digest.
 
@@ -300,7 +300,7 @@ Priority after T-008 publication:
 **Status:** DONE. **Priority:** P0. Commit `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 
 ### T-008 — Build session/context broker
-**Status:** DONE / VERIFIED / PUBLICATION READY. **Priority:** P1 / DEPENDENCY LEVERAGE.  
+**Status:** DONE / VERIFIED / PUBLISHED. **Priority:** P1 / DEPENDENCY LEVERAGE. Publication `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`.  
 **Dependencies:** T-004,T-006,T-007 published.  
 **Pre-flight lineage:** first publication-lineage commit `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c` persists `.engineering/preflight/T-008.md` with `Status: IN_PROGRESS`, scope, protected surfaces and verification plan.  
 **Implementation lineage:** `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`.  
@@ -313,8 +313,8 @@ Priority after T-008 publication:
 **Tests:** broad state/model/capability/workspace/context matrix; exact acquire boundary and one-unit-below rotation; preferred hysteresis retain boundary; malformed/duplicate/mismatched snapshot rejection; Codex no-affinity sentinel; real SQLite StoreSource; missing-capacity UNKNOWN characterization; 128-way concurrent deterministic evaluator sentinel.  
 **Race/property/mutation evidence:** repository-wide `go test -race ./...` PASS; randomized order/property sentinel; tests kill unsafe mutants that reuse below threshold, reuse unknown/exhausted context, ignore workspace affinity, infer Codex session affinity, allow draining replacement, accept malformed snapshot or make threshold boundary strict in the wrong direction.  
 **Performance:** permanent CI gate `BenchmarkEvaluate100Sessions`; qualification on GitHub Linux AMD EPYC measured `42,494 ns/op`, `20,144 B/op`, `9 allocs/op`.  
-**Verification:** technical tree `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed module-tidy, targeted process gates, `go test ./...`, `go test -race ./...`, `go vet ./...`, broker + all existing benchmark smoke gates and Windows full tests. Clean publication lineage reuses the same technical tree content and is being requalified after this reconciliation.  
-**Adversarial review:** technical diff from `main@7565158…` is limited to `internal/harness/provider/session/*` plus one broker benchmark CI step; no migrations, scheduler, router, provider adapter, credential/network or runtime-ledger changes.  
+**Verification/publication:** experimental technical tree `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed module-tidy, targeted process gates, `go test ./...`, `go test -race ./...`, `go vet ./...`, broker + all existing benchmark smoke gates and Windows full tests. Clean publication lineage `5a740b7… -> 921f0fb… -> 9fbd31d…` was independently requalified with the same full Linux/Windows/race/vet/benchmark gate set, fresh `main` remained at T-011, ancestry was 3 ahead / 0 behind, and `main` was fast-forwarded to `9fbd31d…` with `force=false`.  
+**Adversarial review:** technical diff from `main@7565158…` is limited to `internal/harness/provider/session/*`, `.engineering/preflight/T-008.md`, one broker benchmark CI step and living-plan reconciliation; no migrations, scheduler, router, provider adapter, credential/network or runtime-ledger changes.  
 **Acceptance:** no session is reused without authoritative account/model/session attribution and safe configured context headroom; unavailable/draining/provider-health boundaries are explicit; Codex no-affinity behavior fails closed.
 
 ### T-009 — Normalize capacity and effective headroom
@@ -329,7 +329,7 @@ All applicable compatible native-metric quota windows are checked against comple
 
 ### T-012 — Add explainable shadow selector
 **Status:** READY / NEXT. **Priority:** P0.  
-Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break; durable rationale. Dependencies T-008..T-011 are implemented/qualified, with T-008 publication as the final prerequisite action.
+Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break; durable rationale. Dependencies T-008..T-011 are published and complete.
 
 ### T-013 — Introduce TaskEnvelope and plan digest
 **Status:** TODO. **Priority:** P0. Dependencies: T-012.
@@ -477,7 +477,7 @@ Engineering-process path:
 - T-029 `d6fc97d19b2161db4256aafa839715d929a6eb95`
 - T-010 `9d327e7e530eb940021c7a3dce11b9f33944d53f`
 - T-011 `75651581908af7eb3b9b4148106fa142e5707bd9`
-- T-008 pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`; implementation qualification `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`; publication pending reconciled-tree CI.
+- T-008 `9fbd31d0a1348d45acf29c7c38dab3a138e66acb` (pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`, implementation `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`).
 
 ## 13. Recent Iteration Log
 
@@ -502,12 +502,12 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Changes:** new `internal/harness/provider/session` pure broker; coherent `StoreSource`; stable actions/reasons; caller-configured acquire/retain hysteresis; workspace affinity; draining semantics; deterministic candidate ordering; explicit context rotation; Codex no-inference boundary; CI benchmark.  
 **Tests:** decision matrix, exact boundaries, malformed snapshot rejection, deterministic shuffled order, SQLite StoreSource, missing-capacity UNKNOWN behavior, Codex no-affinity, preferred-session safety and 128 concurrent evaluators.  
 **Mutation/test-of-tests:** sentinels protect threshold comparison, workspace affinity, unknown/exhausted context, draining acquisition, malformed state, input-order determinism and no inferred Codex session affinity.  
-**Verification:** experimental technical head `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed full Linux tests, `-race`, vet, all smoke benchmarks and Windows full tests. Dedicated broker benchmark: `42,494 ns/op`, `20,144 B/op`, `9 allocs/op` for 100 candidates.  
+**Verification:** experimental technical head `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed full Linux tests, `-race`, vet, all smoke benchmarks and Windows full tests. Dedicated broker benchmark: `42,494 ns/op`, `20,144 B/op`, `9 allocs/op` for 100 candidates. The clean publication lineage was then independently requalified through full Linux/Windows CI, race, vet and all smoke benchmarks.  
 **Security/compatibility:** no migration, credentials, network listeners, provider adapter, scheduler, router or runtime-ledger changes; StoreSource uses one coherent durable View and validates capacity/account/provider consistency.  
-**Adversarial review:** technical diff from published T-011 is only new session package plus three CI lines for broker benchmark.  
+**Adversarial review:** published diff from T-011 is only the durable T-008 pre-flight, new session package, three CI lines for broker benchmark and living-plan reconciliation.  
 **Process review:** the first experimental branch performed implementation writes before a durable T-008 pre-flight marker. Rather than hide or force-rewrite that history, publication lineage was rebuilt from published `main`: first commit `5a740b7…` is the durable `IN_PROGRESS` pre-flight, second commit `921f0fb…` carries the already-qualified technical tree. This preserves I-009 and makes the publication lineage plan-first without force. T-030 remains responsible for automating this ordering so repair is unnecessary in future.  
-**Plan result:** F-010 resolved in qualified T-008; F-018 is now enforced by broker no-inference behavior; T-012 becomes READY/NEXT after publication.  
-**Publication:** this reconciled lineage must pass full Linux/Windows CI, race, vet and all benchmarks; then remote `main` is re-read and only a fast-forward is allowed.
+**Plan result:** F-010 is resolved/published; F-018 is enforced by broker no-inference behavior; T-012 is READY/NEXT with no remaining prerequisite blocker.  
+**Publication:** fresh `main` guard observed T-011 at `7565158…`, qualified lineage was 3 commits ahead / 0 behind, and `main` was fast-forwarded with `force=false` to `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`.
 
 ## 14. Definition of Final Done
 
@@ -515,18 +515,18 @@ No open Critical/High routing or engineering-control finding without explicit ac
 
 ## 15. Context Compression Checkpoint — after T-008
 
-`CURRENT HEAD:` publication-lineage pre-flight is `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`; qualified technical tree is `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`; this reconciled plan commit is publication-ready only after its own full CI. Observed published base before reconciliation is `main@75651581908af7eb3b9b4148106fa142e5707bd9`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations and deterministic authoritative session/context brokering are implemented and technically qualified.  
+`CURRENT HEAD:` T-008 publication authority is `main@9fbd31d0a1348d45acf29c7c38dab3a138e66acb`; pre-flight is `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`; implementation is `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`. A later plan-only reconciliation may advance `main` without changing T-008 production code; `9fbd31d…` remains the T-008 publication milestone.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations and deterministic authoritative session/context brokering are implemented, qualified and published.  
 `ARCHITECTURE:` `provider/demand` owns native-unit demand; `provider/session` owns pure session/context reuse/rotation policy and coherent StoreSource; `provider/reservation` owns atomic feasibility/claim creation; existing Store transactions remain authority; no session schema migration was added.  
 `CRITICAL INVARIANTS:` I-005, I-018, I-020, I-021, I-023..I-027, I-033..I-037 plus I-008/I-009 publication fencing.  
-`COMPLETED THIS ITERATION:` T-008 implementation and qualification; publication is the only remaining action for the task.  
-`RESOLVED FINDINGS:` F-010 resolved by the broker; F-018 enforced by no-inference semantics; T-011/F-004 is already published.  
+`COMPLETED THIS ITERATION:` T-008 implementation, qualification and publication.  
+`RESOLVED FINDINGS:` F-010 resolved/published by the broker; F-018 enforced by no-inference semantics; T-011/F-004 is already published.  
 `OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-001 remains until T-012; F-002/F-008/F-009 remain dependency-chain work.  
-`BLOCKERS:` none for T-012 after T-008 publication; T-013 remains blocked on T-012.  
+`BLOCKERS:` none for T-012; T-013 remains blocked on T-012.  
 `NEXT TASK:` T-012 — explainable shadow selector.  
-`WHY NEXT:` T-012 is P0, all implementation prerequisites T-008..T-011 are now present, and it converts the observation/demand/session/reservation foundations into a deterministic explainable provider decision without yet enabling risky write routing.  
+`WHY NEXT:` T-012 is P0, all implementation prerequisites T-008..T-011 are published, and it converts the observation/demand/session/reservation foundations into a deterministic explainable provider decision without yet enabling risky write routing.  
 `CRITICAL FILES:` `internal/harness/provider/session/broker.go`, `internal/harness/provider/session/broker_test.go`, `internal/harness/provider/session/concurrency_test.go`, `internal/harness/provider/session/store_source_test.go`, `internal/harness/model/provider.go`, `internal/harness/provider/antigravity/adapter.go`, `internal/harness/provider/codex/adapter.go`, `internal/harness/provider/reservation`, `internal/harness/store/store.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-008.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/session`; `go test ./...`; `go test -race ./...`; `go vet ./...`; `go test ./internal/harness/provider/session -run '^$' -bench '^BenchmarkEvaluate100Sessions$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`; then compare against fresh main and verify fast-forward ancestry.  
+`VERIFICATION COMMANDS:` for T-008 historical verification: `go test ./internal/harness/provider/session`; `go test ./...`; `go test -race ./...`; `go vet ./...`; `go test ./internal/harness/provider/session -run '^$' -bench '^BenchmarkEvaluate100Sessions$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`. For T-012, begin with a durable plan-first pre-flight before production edits.  
 `IMPORTANT DECISIONS:` only authoritative ProviderSessionSnapshot may be reused; Codex thread->model affinity is never inferred; unknown context is never unlimited; same-affinity unusable context rotates; DRAINING may reuse but not acquire; acquire/retain thresholds are caller-configured hysteresis; candidate choice is deterministic; missing capacity health remains UNKNOWN rather than fabricated evidence.  
 `REJECTED OPTIONS:` inferred Codex session/model binding, universal reuse percentages, unknown context as unlimited, GUI/transcript heuristics for affinity, new session schema, adapter rewrite, independent torn Store reads, force publication.  
 `NEW PROCESS LEARNING:` an experimental branch that starts implementation before durable pre-flight should not be rewritten or silently accepted. Rebuild publication lineage from the published base with an explicit plan-first marker, preserve qualified tree content, re-run full CI on the clean lineage, and only then fast-forward `main`; T-030 should make this automatic.
