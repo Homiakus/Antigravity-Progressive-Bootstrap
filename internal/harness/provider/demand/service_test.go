@@ -39,15 +39,31 @@ func TestEstimatorPassesBoundedHistoryContract(t *testing.T) {
 	}
 }
 
-func TestEstimatorRejectsUnboundedHistorySource(t *testing.T) {
+func TestEstimatorAllowsBoundedUnionAcrossFallbackPopulations(t *testing.T) {
 	p := smallPolicy()
-	tooMany := make([]Sample, p.MaxSamples+1)
+	// More than one population's MaxSamples is legitimate: a source can return
+	// distinct slices needed for exact and broader fallbacks. The total remains
+	// bounded by MaxSamples * number of specificity populations.
+	count := p.MaxSamples + 1
+	boundedUnion := make([]Sample, count)
+	for i := range boundedUnion {
+		boundedUnion[i] = Sample{Key: testKey(), Amount: float64(i), ObservedAt: testNow}
+	}
+	if _, err := (Estimator{Source: &fakeHistorySource{samples: boundedUnion}, Policy: p}).Estimate(context.Background(), testKey(), testNow); err != nil {
+		t.Fatalf("bounded fallback union rejected: %v", err)
+	}
+}
+
+func TestEstimatorRejectsHistoryBeyondAllFallbackBounds(t *testing.T) {
+	p := smallPolicy()
+	maxReturned := p.MaxSamples * len(candidates(testKey()))
+	tooMany := make([]Sample, maxReturned+1)
 	for i := range tooMany {
 		tooMany[i] = Sample{Key: testKey(), Amount: float64(i), ObservedAt: testNow}
 	}
 	_, err := (Estimator{Source: &fakeHistorySource{samples: tooMany}, Policy: p}).Estimate(context.Background(), testKey(), testNow)
 	if err == nil {
-		t.Fatal("history source exceeding requested bound was accepted")
+		t.Fatal("history source exceeding bounded fallback union was accepted")
 	}
 }
 
