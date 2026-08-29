@@ -15,9 +15,9 @@ import (
 )
 
 var (
-	ErrCapacityUnavailable = errors.New("provider reservation: capacity unavailable")
+	ErrCapacityUnavailable  = errors.New("provider reservation: capacity unavailable")
 	ErrInsufficientCapacity = errors.New("provider reservation: insufficient capacity")
-	ErrReservationConflict = errors.New("provider reservation: conflicting active assignment or claim")
+	ErrReservationConflict  = errors.New("provider reservation: conflicting active assignment or claim")
 )
 
 // Policy controls the evidence freshness inherited from T-009 and the maximum
@@ -158,7 +158,7 @@ func (s Service) Reserve(ctx context.Context, req Request) (Result, error) {
 		if err != nil {
 			return fmt.Errorf("read complete active provider claims: %w", err)
 		}
-		claims, err := evaluateClaims(windows, allClaims, req.Demand.Reservation, req.DecisionAt, s.Policy)
+		claims, err := evaluateClaims(req.AssignmentID, windows, allClaims, req.Demand.Reservation, req.DecisionAt, s.Policy)
 		if err != nil {
 			return err
 		}
@@ -291,7 +291,7 @@ func effectiveAvailable(window capacity.Window) (float64, bool) {
 	}
 }
 
-func evaluateClaims(windows []capacity.Window, reservations []harnessmodel.ProviderReservation, amount float64, now time.Time, policy Policy) ([]WindowClaim, error) {
+func evaluateClaims(assignmentID harnessmodel.ProviderAssignmentID, windows []capacity.Window, reservations []harnessmodel.ProviderReservation, amount float64, now time.Time, policy Policy) ([]WindowClaim, error) {
 	claims := make([]WindowClaim, 0, len(windows))
 	for _, window := range windows {
 		available, ok := effectiveAvailable(window)
@@ -328,15 +328,12 @@ func evaluateClaims(windows []capacity.Window, reservations []harnessmodel.Provi
 			WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric,
 			EffectiveCapacity: available, AlreadyClaimed: claimed, Reserved: amount,
 			RemainingAfter: remaining - amount, ExpiresAt: expiresAt,
-			ReservationID: deterministicReservationID(reqIDContext{WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric}),
+			ReservationID: deterministicReservationID(reqIDContext{AssignmentID: assignmentID, WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric}),
 		})
 	}
 	return claims, nil
 }
 
-// reqIDContext is populated with the assignment id immediately before claims
-// are persisted. Keeping ID derivation separate makes the dimension hash easy
-// to mutation-test without leaking provider window text into identifiers.
 type reqIDContext struct {
 	AssignmentID harnessmodel.ProviderAssignmentID
 	WindowID     string
