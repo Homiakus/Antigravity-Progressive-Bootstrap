@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 	providerreservation "github.com/homiakus/agctl/internal/harness/provider/reservation"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 )
