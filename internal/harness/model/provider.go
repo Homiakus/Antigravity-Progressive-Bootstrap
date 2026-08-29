@@ -194,6 +194,7 @@ type ProviderSessionSnapshot struct {
 	ContextUsed          int64                `json:"contextUsed,omitempty"`
 	ContextLimit         int64                `json:"contextLimit,omitempty"`
 	LastUsedAt           time.Time            `json:"lastUsedAt"`
+	ObservedAt           time.Time            `json:"observedAt,omitempty"`
 	WorkspaceFingerprint string               `json:"workspaceFingerprint,omitempty"`
 }
 
