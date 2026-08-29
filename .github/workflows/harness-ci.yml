@@ -59,6 +59,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Provider demand estimator smoke benchmark
+        run: go test ./internal/harness/provider/demand -run '^$' -bench '^BenchmarkEstimate1000Samples$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 
