@@ -126,7 +126,10 @@ func TestInsufficientExactHistoryFallsBackWithoutMixingMetricOrProvider(t *testi
 	if got.Source != SourceWithoutContext {
 		t.Fatalf("expected context fallback, got %+v", got)
 	}
-	if got.SampleCount != 8 || got.P80 != 100 {
+	// Compatible amounts are 10,20,30,40,50,100,110,120. Nearest-rank
+	// p80 uses ceil(0.8*8)=7 -> 110. Foreign provider/metric 900/800 values
+	// must never enter this population.
+	if got.SampleCount != 8 || got.P80 != 110 {
 		t.Fatalf("provider/metric isolation failed: %+v", got)
 	}
 }
