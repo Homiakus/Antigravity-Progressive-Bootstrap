@@ -126,8 +126,6 @@ func TestInsufficientExactHistoryFallsBackWithoutMixingMetricOrProvider(t *testi
 	if got.Source != SourceWithoutContext {
 		t.Fatalf("expected context fallback, got %+v", got)
 	}
-	// The broader population contains the three exact samples plus five other
-	// context samples; incompatible provider/metric samples must never join it.
 	if got.SampleCount != 8 || got.P80 != 100 {
 		t.Fatalf("provider/metric isolation failed: %+v", got)
 	}
@@ -219,8 +217,6 @@ func TestEqualTimestampHistoryKeepsLargerClaimsAtBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Bounded equal-time history must retain 10,9,8,7,6. Sorted for quantiles
-	// that is 6,7,8,9,10, so p80 is 9. A low-value tie-break would yield 4.
 	if got.P80 != 9 || got.Reservation != 9 {
 		t.Fatalf("equal-time truncation underestimated demand: %+v", got)
 	}
@@ -283,6 +279,7 @@ func FuzzFractionEstimateStaysBounded(f *testing.F) {
 			if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
 				t.Skip()
 			}
+		}
 		query := testKey()
 		query.Metric = harnessmodel.QuotaMetricFraction
 		got, err := EstimateAt(query, samplesFor(query, values...), testNow, smallPolicy())
