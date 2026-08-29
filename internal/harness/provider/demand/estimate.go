@@ -173,14 +173,17 @@ func EstimateAt(query Key, samples []Sample, now time.Time, policy Policy) (Esti
 	}
 
 	for _, candidate := range candidates(query) {
-		matched := matching(valid, candidate.key, candidate.source)
+		matched := matching(valid, candidate.key)
 		if len(matched) < policy.MinSamples {
 			continue
 		}
 		if len(matched) > policy.MaxSamples {
 			sort.SliceStable(matched, func(i, j int) bool {
 				if matched[i].ObservedAt.Equal(matched[j].ObservedAt) {
-					return matched[i].Amount < matched[j].Amount
+					// If a provider reports several samples with the same timestamp,
+					// retain the larger claims at the bounded-history boundary. Keeping
+					// smaller equal-time values would systematically underestimate p80.
+					return matched[i].Amount > matched[j].Amount
 				}
 				return matched[i].ObservedAt.After(matched[j].ObservedAt)
 			})
@@ -192,7 +195,7 @@ func EstimateAt(query Key, samples []Sample, now time.Time, policy Policy) (Esti
 	if value, ok := policy.ColdStart[query.Metric]; ok {
 		return Estimate{
 			Key: query, Available: true, Source: SourceColdStart,
-			P50: value, P80: value, Reservation: value, Confidence: 0.20,
+			P50: value, P80: value, Reservation: value, Confidence: sourceConfidence(SourceColdStart),
 		}, nil
 	}
 	return Estimate{Key: query, Source: SourceUnavailable}, nil
@@ -233,7 +236,7 @@ func equalKey(a, b Key) bool {
 		a.RepositoryID == b.RepositoryID && a.ContextClass == b.ContextClass && a.Metric == b.Metric
 }
 
-func matching(samples []Sample, key Key, source Source) []Sample {
+func matching(samples []Sample, key Key) []Sample {
 	out := make([]Sample, 0, len(samples))
 	for _, sample := range samples {
 		if sample.Key.Provider != key.Provider || sample.Key.Metric != key.Metric {
