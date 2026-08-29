@@ -19,7 +19,7 @@ Current qualified milestones:
 - T-028 separates coordinator and ordinary headless-worker authority; published as `595f0d002aaf97ee74472d0bdab84af14fcd0bab`.
 - T-029 makes publication/checkpoint evidence machine-verifiable; published as `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 - T-010 conservative native-unit demand estimation is published as `9d327e7e530eb940021c7a3dce11b9f33944d53f`; post-push Linux/Windows CI, race, vet and benchmarks PASS.
-- T-011 is IN_PROGRESS / P0 because it directly closes remaining Critical F-004 quota oversubscription by making capacity/claims/assignment/reservation one atomic writer transaction. T-008 remains independently READY and is required before T-012.
+- T-011 atomic provider reservations are implemented and qualified on `918ac96f8c19d840cda078fef46c6008731c1257`; reconciliation/publication is the current final action. T-008 becomes the highest-leverage READY task after publication because it is the only remaining prerequisite before T-012.
 
 ## 2. Architecture
 
@@ -104,20 +104,20 @@ Orthogonal concepts MUST remain separate: `Worker`, `ProviderAccount`, `Provider
 ## 4. Findings Registry
 
 ### F-001 — Provider capacity is not a scheduler dimension
-**Status:** Partially resolved. **Severity:** High. **Confidence:** Confirmed.  
-T-009 provides normalized headroom; T-011/T-012 integrate feasibility/routing.
+**Status:** Partially resolved in T-009/T-011. **Severity:** High. **Confidence:** Confirmed.  
+T-009 provides normalized headroom and T-011 provides atomic feasibility/reservation; T-012 still integrates those signals into selector policy.
 
 ### F-002 — Codex is not yet a complete first-class execution provider
 **Status:** Partially resolved. **Severity:** High. **Confidence:** Confirmed.  
 Observation is first-class; portable execution waits for T-013/T-014.
 
 ### F-003 — Workflow budget cannot substitute for provider quota
-**Status:** Partially resolved in T-010. **Severity:** High. **Confidence:** Confirmed.  
-T-010 models demand in provider-native units independent of workflow spend. T-011 performs supply feasibility/reservation separately.
+**Status:** Resolved by T-010/T-011 boundary. **Severity:** High. **Confidence:** Confirmed.  
+T-010 models demand in provider-native units independently of workflow spend; T-011 checks and atomically claims external provider supply without consulting workflow-budget allowance as capacity.
 
 ### F-004 — Durable claims exist but atomic quota reservation is incomplete
-**Status:** IN PROGRESS via T-011. **Severity:** Critical. **Confidence:** Confirmed.  
-T-005 added typed durable assignments/reservations and complete ACTIVE-claim reads; T-010 supplies conservative compatible-unit demand. T-011 now owns the single-writer transaction that must atomically read latest capacity + all non-expired ACTIVE compatible claims + normalized feasibility + assignment/reservation.
+**Status:** Resolved in qualified T-011; publication pending. **Severity:** Critical. **Confidence:** Confirmed.  
+T-011 now performs latest-capacity read, normalization, complete non-expired ACTIVE claim accounting, native-unit feasibility, assignment and all applicable-window reservations inside one existing writer transaction. Rollback, idempotent replay and 100-way oversubscription tests prove the race gap is closed in the qualified tree; publication makes this authoritative on `main`.
 
 ### F-005 — Existing worker/lease subsystem must be reused
 **Status:** Resolved by architecture. **Severity:** High.  
@@ -192,8 +192,8 @@ Native absolute headroom is preserved without invented denominator.
 Reset-aware expiry implemented.
 
 ### F-023 — Paged ACTIVE-reservation reads can undercount claims
-**Status:** Resolved in T-005. **Severity:** Critical.  
-`ListAllActiveProviderReservations` is the correctness read; T-011 must keep complete accounting inside its transaction.
+**Status:** Resolved in T-005/T-011. **Severity:** Critical.  
+`ListAllActiveProviderReservations` remains the correctness fallback; T-011 may instead use an equivalent complete transactional SQL aggregate and never a paged diagnostic subset.
 
 ### F-024 — Mutating one assignment record would destroy handoff history
 **Status:** Resolved in T-005. **Severity:** High.  
@@ -235,6 +235,10 @@ Completion now requires latest complete repository-resident checkpoint bound to 
 **Status:** Resolved by boundary in T-010; integration requirement remains. **Category:** Provider Demand / Attribution. **Severity:** High. **Confidence:** Confirmed.  
 `ProviderUsageSample` durably and idempotently stores assignment/account/model/metric/amount/time, but not semantic task class, repository identity or context class. T-010 requires explicit `UsageClassification`; T-011/T-012 must not infer those dimensions from opaque identifiers.
 
+### F-034 — Complete Go materialization of ACTIVE claims is too allocation-heavy for the reservation hot path
+**Status:** Resolved in T-011. **Category:** Provider Reservation / Performance. **Severity:** Medium. **Confidence:** Measured.  
+The correctness-first 10k ACTIVE-claim implementation measured ~48.47 ms/op, ~21.5 MB/op and 490,487 allocs/op. T-011 retained I-025 but added an optional transactional SQL `GROUP BY/SUM` aggregate for SQLite, with the complete unpaged Reader fallback preserved for other Store implementations. Final qualification measured ~7.46 ms/op, ~15.6 KB/op and 439 allocs/op without a schema migration or weaker claim accounting.
+
 ## 5. Risk Register
 
 | Risk | Level | Primary mitigation |
@@ -261,8 +265,8 @@ T001 DONE -> T002 DONE -> T003 DONE -> T004 DONE
                                       |-> T005 DONE
 T004,T006,T007 -> T008 READY
 T004,T006,T007 -> T009 DONE
-T005,T009 -> T010 DONE -> T011 IN_PROGRESS -> T012
-T008 ------------------------------------------> T012
+T005,T009 -> T010 DONE -> T011 DONE -> T012
+T008 ---------------------------------> T012
 T012 -> T013 -> T014 -> T015
 T013,T015 -> T016 -> T017 -> T018 -> T019
 T012 -> T020
@@ -276,11 +280,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority now:
+Priority after T-011 publication:
 
-1. **T-011 P0 / IN_PROGRESS** — closes Critical F-004 with atomic reservation transaction.
-2. **T-008 P1** — independent session broker required before T-012.
-3. **T-030 P1** — structural plan/process audit.
+1. **T-008 P1 / NEXT BY DEPENDENCY LEVERAGE** — the only remaining prerequisite for P0 T-012 and the direct mitigation for session-context exhaustion.
+2. **T-030 P1** — structural plan/process audit; independently READY but lower product-path leverage than T-008.
+3. **T-012 P0 / BLOCKED ON T-008** — explainable shadow selector immediately follows once session/context brokering is available.
 
 ## 7. Atomic Tasks
 
@@ -307,7 +311,7 @@ Append-only v15 runtime ledger; typed assignment/reservation/usage/circuit state
 **Status:** DONE. **Priority:** P0. Commit `cefead407f3ad4a11ac46379f2f9b72a9129d353`.
 
 ### T-008 — Build session/context broker
-**Status:** READY. **Priority:** P1.  
+**Status:** READY / NEXT. **Priority:** P1 / DEPENDENCY LEVERAGE.  
 REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE from context headroom, affinity, health/model requirements and hysteresis. No inferred Codex thread->model binding. Dependencies: T-004,T-006,T-007.
 
 ### T-009 — Normalize capacity and effective headroom
@@ -319,21 +323,22 @@ Unit-preserving headroom, freshness/confidence decay, reset expiry, exhaustion-p
 Pure nearest-rank p50/p80 estimator; reservation=p80; bounded history; provider/metric isolation; scoped explicit cold start; usage-classification boundary; HistorySource; FRACTION/OPAQUE safety; fuzz/mutation sentinels; Linux/Windows/race/vet/benchmarks PASS.
 
 ### T-011 — Implement atomic provider reservations
-**Status:** IN_PROGRESS. **Priority:** P0. **Leverage:** CRITICAL.  
+**Status:** DONE / VERIFIED, publication pending. **Priority:** P0. **Leverage:** CRITICAL.  
 **Dependencies:** T-005,T-009,T-010 are DONE and published.  
-**Root cause:** normalized provider supply, conservative demand and durable claims exist, but feasibility + claim accounting + assignment/reservation creation are not yet one atomic operation; parallel selectors can therefore race and oversubscribe the same capacity.  
-**Protected surface:** released v15 migration/checksums are immutable; do not add a parallel mutex/distributed-lock subsystem; do not rewrite capacity normalization, demand percentile semantics, scheduler, worker lease or provider adapters unless a proven defect requires it.  
-**Transaction boundary:** reuse `store.Store.Update`. SQLite already serializes in-process writes through its authoritative writer (`MaxOpenConns(1)`); SQL FK/CHECK/partial-UNIQUE/CAS remain the durable invariant layer.  
-**Atomic operation:** inside one `Update`, read latest exact capacity, normalize at the same decision time, read the complete non-expired ACTIVE reservation set, filter only semantically compatible claims, compute claimed native quantity, require `available >= demand.Reservation`, then append ACTIVE assignment and reservation as one commit. Any stale/unusable capacity, incompatible unit/scope, insufficient headroom, uniqueness/idempotency conflict, or write failure rolls back both.  
-**Open characterization questions before implementation:** (1) zero-demand semantics: assignment-only versus explicit zero claim; default preference is assignment-only if invariants permit, never fabricate positive demand; (2) retry/idempotency: same semantic request must return/recover the existing active assignment+reservation while conflicting replay fails closed; (3) claim compatibility must be capacity-key/window/model/account exact enough to avoid subtracting unrelated windows while never undercounting overlapping claims; (4) reservation expiry must not outlive the evidence window/reset boundary.  
-**Edge-space:** provider × account × model-scope × metric × capacity key/window × fresh/stale/reset boundary × demand 0/epsilon/equal/headroom+epsilon × active/expired claims × same/different key × concurrent attempts × replay/conflict × cancellation/rollback.  
-**Tests:** exact feasible reservation; insufficient capacity rollback; stale/reset-boundary refusal; OPAQUE/incompatible metric refusal; model-scope mismatch; complete-claim subtraction; expired claims excluded; zero-demand explicit behavior; idempotent replay/conflicting replay; injected second-write failure proves assignment rollback; 100+ concurrent reservers cannot exceed normalized supply; cancellation; Windows.  
-**Mutation/test-of-tests:** kill mutants that move reads outside transaction, use paged reservations, omit one compatible claim, compare against raw rather than normalized capacity, skip reservation write, accept metric/model/key mismatch, change `>=` boundary, include expired claim, permit stale equality, or allow replay to create a second ACTIVE assignment.  
-**Performance:** benchmark 10k ACTIVE claims and 100+ contention; establish bounded baseline without optimizing away correctness.  
-**Acceptance:** no execution-visible ACTIVE provider assignment may be committed unless its required claim is atomically feasible and persisted (except explicitly defined zero-demand assignment-only semantics); concurrent successful reservations never exceed the compatible normalized headroom snapshot.
+**Root cause closed:** normalized provider supply, conservative demand and durable claims previously existed separately; T-011 now makes capacity evidence + complete claims + feasibility + assignment/reservations one writer transaction so parallel selectors cannot oversubscribe the same observed headroom.  
+**Protected surface preserved:** no released v15 migration/checksum edit, no scheduler/worker/provider-adapter rewrite, and no parallel mutex/distributed-lock subsystem. `store.Store.Update`, SQLite `MaxOpenConns(1)` writer serialization and existing FK/CHECK/partial-UNIQUE/CAS contracts remain authoritative.  
+**Atomic policy:** validate active account + enabled authoritative model; read latest capacity and normalize at the same decision time; select every applicable compatible native-metric window; account for the complete non-expired ACTIVE claim set; require `available >= p80 reservation`; append one ACTIVE assignment and positive claims for every applicable window in the same transaction. Any stale/unusable evidence, incompatible scope/metric, insufficiency or write conflict aborts the transaction.  
+**Zero/replay semantics:** zero demand is explicitly assignment-only because the released domain/SQL contract requires positive reservation amount; no fake epsilon claim is created. Exact same active request is replay-idempotent; conflicting assignment/account/model/session/demand or non-canonical claim replay fails closed. Deterministic claim IDs include assignment + provider-native window + model scope + metric.  
+**Expiry:** claim lifetime is capped by operational `ClaimTTL`, capacity evidence expiry and provider reset; already-expired claims are excluded from complete accounting. OPAQUE is never reservable; FRACTION remains native and bounded.  
+**Complete-accounting implementation:** every Store can use `ListAllActiveProviderReservations`; SQLite additionally implements optional `ActiveProviderReservationAggregator` using a complete transactional `GROUP BY model_id,metric + SUM(amount),COUNT(*)` for the requested provider-native window. Contradictory dimensions fail closed. The fallback characterization deliberately hides this optional capability and proves non-SQLite complete-list correctness remains intact.  
+**Concurrency/rollback proof:** with capacity=100 and demand=10, 100 concurrent independent attempts yield exactly 10 successes and never exceed 100 ACTIVE claimed units. Fifty concurrent deliveries of one semantic request yield one physical assignment/claim plus 49 successful replays. A SQLite trigger that fails the second multi-window claim proves the already-written first claim and assignment both roll back.  
+**Edge/mutation sentinels:** exact remaining boundary succeeds while over-boundary fails; expired claims do not count; contradictory same-window dimension fails closed; IDs are assignment-scoped; disabled model/account, stale/reset/unavailable capacity, cancellation and invalid native quantities fail closed; FRACTION end-to-end stays native; multi-window claims cover all simultaneous quota windows. These tests kill the material T-011 mutants for paged/omitted claims, raw capacity, broken `>=`, expired-claim inclusion, unit/scope mismatch, partial commit and duplicate replay.  
+**Performance finding/resolution:** initial correctness-first 10k ACTIVE-claim benchmark was ~48.47 ms/op, ~21.5 MB/op, 490,487 allocs/op. Complete transactional SQL aggregation reduced the final qualified run to ~7.46 ms/op, ~15.6 KB/op and 439 allocs/op while retaining the unpaged fallback and requiring no migration.  
+**Verification:** pre-reconciliation qualification head `918ac96f8c19d840cda078fef46c6008731c1257` — module-tidy guard PASS; bridge/process gates PASS; `go test ./...` PASS; `go test -race ./...` PASS; `go vet ./...` PASS; demand/reservation/compiler/store/scheduler/retry/wait benchmark smoke PASS; Windows targeted/full PASS. Adversarial diff review shows only reservation/store/test/CI/plan scope and no migration/scheduler/router/provider-adapter drift.  
+**Acceptance satisfied:** no positive-demand execution-visible ACTIVE assignment commits without all required compatible claims being atomically feasible and persisted; explicit zero-demand assignment-only semantics are bounded by the same account/model/capacity checks; concurrent successful reservations cannot exceed compatible normalized headroom.
 
 ### T-012 — Add explainable shadow selector
-**Status:** TODO. **Priority:** P0.  
+**Status:** TODO / BLOCKED ON T-008. **Priority:** P0.  
 Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break. Dependencies: T-008..T-011.
 
 ### T-013 — Introduce TaskEnvelope and plan digest
@@ -416,15 +421,15 @@ Process/provider mutation sentinels are executable requirements:
 - mutating T-029 publication branch/head/remote/tree/ancestor/clean/no-force semantics must fail;
 - omitting any required repository checkpoint field or substituting stale task checkpoint must fail;
 - T-010 reservation must remain p80, provider/metric boundaries cannot broaden, equal-time truncation cannot prefer low claims, and FRACTION estimates remain bounded;
-- T-011 transaction/complete-claim/native-unit/rollback boundaries must be protected by concurrency and mutation sentinels.
+- T-011 transaction/complete-claim/native-unit/rollback boundaries are protected by concurrent oversubscription, same-request replay, exact-boundary, expiry, dimension-conflict and partial-write rollback sentinels.
 
-Performance baseline: do not materially regress harness smoke benchmarks. T-010 establishes a 1000-sample estimator smoke benchmark. T-011 adds 100+ concurrent reservation contention and large active-claim measurement; later T-012 adds selector-scale benchmarks.
+Performance baseline: do not materially regress harness smoke benchmarks. T-010 establishes a 1000-sample estimator smoke benchmark. T-011 establishes a 10k ACTIVE-claim reservation smoke benchmark; qualified aggregate path is ~7.46 ms/op, ~15.6 KB/op and 439 allocs/op on GitHub Linux, versus the initial complete-Go-materialization baseline ~48.47 ms/op, ~21.5 MB/op and 490,487 allocs/op. Later T-012 adds selector-scale benchmarks.
 
 ## 9. Security and Compatibility
 
 Credentials never enter plan/telemetry. Provider payloads and demand samples are bounded/validated; logs redact auth/session material. Remote-worker trust never implies credential or main-write authority. Unknown engineering roles fail closed. Publication verification is read-only and cannot mutate Git state. Demand classification cannot be guessed from opaque IDs. Only final fenced Commit Coordinator may autonomously write `main`; T-019 must enforce this independently of prompt compliance.
 
-Every intermediate state keeps `main` buildable and compatible. Released SQLite migrations remain immutable. T-011 must use existing store/transaction and v15 runtime contracts; no migration or public provider-state rewrite is authorized by pre-flight.
+Every intermediate state keeps `main` buildable and compatible. Released SQLite migrations remain immutable. T-011 uses existing store/transaction and v15 runtime contracts; it adds no migration or public provider-state rewrite. The SQLite aggregate is an optional optimization and non-SQLite Store implementations retain the complete unpaged fallback.
 
 ## 10. Migration and Rollout
 
@@ -470,6 +475,7 @@ Engineering-process path:
 - **R-030** cross-provider or cross-metric demand fallback — rejected.
 - **R-031** infer task/repository/context class from opaque usage IDs or transcript/name heuristics — rejected after F-033.
 - **R-032** one global history limit shared by all fallback populations — rejected; it can starve broader populations and bias availability.
+- **R-033** materialize the complete SQLite ACTIVE-claim set into Go on every hot-path reservation — rejected after F-034 measurement; use the equivalent complete transactional SQL aggregate while retaining the Store fallback.
 
 ## 12. Completed Milestones
 
@@ -485,6 +491,7 @@ Engineering-process path:
 - T-028 `595f0d002aaf97ee74472d0bdab84af14fcd0bab`
 - T-029 `d6fc97d19b2161db4256aafa839715d929a6eb95`
 - T-010 `9d327e7e530eb940021c7a3dce11b9f33944d53f`
+- T-011 qualification `918ac96f8c19d840cda078fef46c6008731c1257`; publication commit becomes authoritative after this reconciled plan passes full CI and fast-forward publication.
 
 ## 13. Recent Iteration Log
 
@@ -500,33 +507,37 @@ Machine-observed publication proof and complete repository-resident checkpoint. 
 ### Iteration 12 — T-010
 Conservative native-unit p80 demand estimator, scoped explicit cold starts, classified history boundary, fuzz/mutation sentinels and benchmark. Qualification/reconciliation passed Linux/Windows full CI, race, vet and benchmarks; one logical fast-forward publication `9d327e7e530eb940021c7a3dce11b9f33944d53f`; post-push CI PASS.
 
-### Iteration 13 — T-011 / STARTED
-**Selected task:** T-011 by Critical F-004 risk leverage.  
-**Durable pre-flight:** this is the first task-specific branch write; no production file preceded it.  
-**Base:** `main@9d327e7e530eb940021c7a3dce11b9f33944d53f`, branch `provider-reservation-t011`.  
-**Root cause:** reservation feasibility is not yet one atomic write transaction.  
-**Protected surface:** v15 immutable; no parallel lock subsystem; capacity/demand semantics preserved.  
-**Characterization target:** Store.Update transaction implementation, exact capacity-key compatibility, complete active claim semantics, zero-demand, replay/conflict and expiry/reset coupling.  
-**Required proof:** rollback, native-unit compatibility, complete claims, stale/reset boundaries, idempotency/conflict, 100+ concurrency, race, mutation sentinels, 10k-claim benchmark, Windows.
+### Iteration 13 — T-011
+**Selected task:** T-011 by Critical F-004 risk leverage; durable `IN_PROGRESS` pre-flight was the first task-specific branch commit.  
+**Root cause:** capacity normalization, p80 demand and durable claims were separately correct but not one atomic feasibility/write decision, leaving a parallel-selector oversubscription race.  
+**Changes:** new provider reservation service; active-account/enabled-model/capacity checks; all applicable simultaneous quota windows; atomic assignment + claims; deterministic assignment-scoped claim IDs; explicit zero-demand assignment-only semantics; exact replay; expiry bounded by TTL/evidence/reset; optional complete SQLite aggregate with unpaged Store fallback; CI benchmark.  
+**Unexpected finding:** F-034 — correctness-first 10k claim materialization was allocation-heavy. The equivalent complete transactional SQL aggregate preserved I-025 while cutting final reservation benchmark to ~7.46 ms/op, ~15.6 KB/op and 439 allocs/op from ~48.47 ms/op, ~21.5 MB/op and 490,487 allocs/op.  
+**Tests:** multi-window success, zero demand, exact/conflicting replay, exact headroom boundary, expired claims, contradictory dimensions, assignment-scoped IDs, disabled account/model, stale/reset/unavailable evidence, cancellation, FRACTION native units, injected second-claim rollback, 100 independent concurrent reservers and 50-way same-request redelivery, non-aggregate Store fallback, Windows.  
+**Mutation/test-of-tests:** sentinels kill omitted/paged claim accounting, raw-capacity comparison, broken boundary, expired-claim inclusion, unit/model/window mismatch, partial multi-window commit and duplicate replay semantics.  
+**Verification:** pre-reconciliation head `918ac96f8c19d840cda078fef46c6008731c1257` — module-tidy, targeted process gates, full Linux tests, race, vet, demand/reservation/legacy benchmarks and Windows full tests PASS.  
+**Compatibility/security:** no migration, credential, network, scheduler/router or provider-adapter change; released v15 immutable; no new lock subsystem; optional aggregate is internal Store capability with complete-list fallback.  
+**Adversarial review:** compare from `main@9d327e7e…` contains only reservation/store/test/CI/plan and the corrected SQLite writer comment; branch is 16 commits ahead/0 behind before reconciliation and no protected-surface drift was found.  
+**Plan result:** F-003/F-004/F-023 closed or reduced as recorded; F-034 found/resolved; T-011 DONE/VERIFIED; T-008 READY/NEXT; T-012 blocked only on T-008.  
+**Publication:** final reconciled head must pass full CI, then re-read remote `main` and publish one logical fast-forward commit; no force.
 
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
-## 15. Context Compression Checkpoint — after T-010 / T-011 started
+## 15. Context Compression Checkpoint — after T-011
 
-`CURRENT HEAD:` `main@9d327e7e530eb940021c7a3dce11b9f33944d53f`; T-011 feature branch starts from this exact published/verified commit.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, native-unit normalization, durable runtime ledger and conservative p80 demand estimation are published; atomic reservation is the active gap.  
-`ARCHITECTURE:` `provider/demand` owns demand; existing `store.Store.Update`/SQLite single writer is T-011 transaction authority; v15 models/constraints remain unchanged.  
-`CRITICAL INVARIANTS:` I-005/I-020/I-021/I-023..I-027/I-035 plus I-008/I-009/I-033/I-034.  
-`COMPLETED THIS ITERATION:` latest completed task is T-010; T-011 is IN_PROGRESS, not complete.  
-`RESOLVED FINDINGS:` F-033 boundary resolved; T-010 demand portion of F-004 complete.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-004 active via T-011; F-007/F-014 residual until T-018/T-019; F-001/F-002/F-003/F-008/F-009 remain dependency-chain work.  
-`BLOCKERS:` none.  
-`NEXT TASK:` T-011 currently active.  
-`WHY NEXT:` all prerequisites are DONE and it directly closes Critical quota oversubscription.  
-`CRITICAL FILES:` `internal/harness/store/store.go`, `internal/harness/store/sqlite/db.go`, `provider_store.go`, `provider_runtime_store.go`, provider capacity normalization, `internal/harness/provider/demand/*`, provider runtime models, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` targeted transaction tests -> concurrent reserver/race/property/mutation tests -> `go test ./...` -> `go test -race ./...` -> `go vet ./...` -> reservation/legacy benchmarks -> Windows full tests.  
-`IMPORTANT DECISIONS:` p80 demand; native units only; complete claim set; normalized capacity; single existing writer transaction; no guessed classification; fail closed on stale/unusable evidence.  
-`REJECTED OPTIONS:` paged claims, raw-capacity comparison, separate mutex/lock service, v15 rewrite, cross-unit summing, invented demand, heuristic attribution.  
-`NEW PROCESS LEARNING:` T-011 corrects T-010 process debt: selected task + pre-flight are now persisted as the first branch change before production code.
+`CURRENT HEAD:` T-011 final publication commit becomes authoritative only after this reconciled plan passes full CI and fast-forward publication; pre-reconciliation qualification head is `918ac96f8c19d840cda078fef46c6008731c1257`, and observed `main` before reconciliation remains `9d327e7e530eb940021c7a3dce11b9f33944d53f`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, native-unit normalization, durable runtime ledger, conservative p80 demand and atomic complete-claim provider reservation are implemented and qualified; session/context brokering is now the next missing selector prerequisite.  
+`ARCHITECTURE:` `provider/demand` owns demand; `provider/reservation` owns atomic feasibility/claim creation; existing `store.Store.Update` and SQLite single writer are transaction authority; SQLite may use optional complete SQL aggregation while other Store implementations retain the complete unpaged fallback; v15 remains unchanged.  
+`CRITICAL INVARIANTS:` I-005/I-020/I-021/I-023..I-027/I-035 plus I-008/I-009/I-033/I-034 for publication.  
+`COMPLETED THIS ITERATION:` T-011.  
+`RESOLVED FINDINGS:` F-003 provider-budget boundary completed; Critical F-004 atomic oversubscription gap closed in the qualified tree; F-023 complete accounting preserved; F-034 performance materialization defect found and resolved.  
+`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-001/F-002/F-008/F-009 remain dependency-chain work. F-004 has no remaining implementation blocker and awaits only publication of the qualified/reconciled tree.  
+`BLOCKERS:` none for T-008; T-012 is blocked only on T-008.  
+`NEXT TASK:` T-008.  
+`WHY NEXT:` T-008 is independently READY, directly mitigates session-context exhaustion/F-010/F-018, and is the only remaining prerequisite before P0 T-012 shadow selection.  
+`CRITICAL FILES:` `internal/harness/model/provider.go`, `internal/harness/model/provider_runtime.go`, `internal/harness/provider/provider.go`, `internal/harness/provider/antigravity/adapter.go`, `internal/harness/provider/codex/adapter.go`, `internal/harness/store/store.go`, `internal/harness/store/sqlite/provider_store.go`, `internal/harness/store/sqlite/provider_runtime_store.go`, `MASTER_PLAN.md`; released migrations remain protected.  
+`VERIFICATION COMMANDS:` first persist T-008 `IN_PROGRESS` + pre-flight on a new branch; characterize current provider-session/context observations and authoritative model affinity; targeted broker decision tests across REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE; no-inferred-affinity sentinels; concurrency/race/property tests; `go test ./...`; `go test -race ./...`; `go vet ./...`; broker/legacy benchmarks; Windows full tests.  
+`IMPORTANT DECISIONS:` reservation demand is p80 in native units; positive demand reserves every applicable simultaneous quota window; zero demand is assignment-only; complete claim accounting may be an equivalent complete SQL aggregate but never paged; exact replay is idempotent; no driver-specific transaction mode or parallel locking; T-008 must not invent Codex thread->model affinity.  
+`REJECTED OPTIONS:` paged claims, raw-capacity comparison, partial multi-window reservation, fabricated epsilon claim, cross-unit summing, new lock service, v15 rewrite, hot-path Go materialization of all SQLite claims, inferred session/model affinity.  
+`NEW PROCESS LEARNING:` the durable plan-first pre-flight was correctly enforced for T-011; correctness-first implementation plus a mandatory scale benchmark exposed F-034 before publication; optional Store capabilities can optimize a backend without weakening the portable correctness contract; final publication still requires a fresh observed-main guard after reconciled-tree CI.
