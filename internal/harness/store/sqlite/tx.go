@@ -43,9 +43,10 @@ func (d *DB) Update(ctx context.Context, fn func(harnessstore.Tx) error) error {
 	if d == nil || d.db == nil {
 		return fmt.Errorf("SQLite database is not open")
 	}
-	// d.db is opened with modernc.org/sqlite _txlock=immediate and a single
-	// connection, so write transactions acquire writer intent at BEGIN rather
-	// than racing a deferred read->write upgrade.
+	// d.db is the authoritative single-connection writer pool. That serializes
+	// in-process read/modify/write transactions before they enter SQLite; the
+	// SQL transaction plus FK/CHECK/UNIQUE/CAS invariants provide durable
+	// correctness. No driver-specific _txlock mode is required.
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin SQLite update transaction: %w", err)
