@@ -25,18 +25,18 @@ const (
 type Reason string
 
 const (
-	ReasonReusableSession        Reason = "REUSABLE_SESSION"
-	ReasonRetainedByHysteresis   Reason = "RETAINED_BY_HYSTERESIS"
-	ReasonNoReusableSession      Reason = "NO_REUSABLE_SESSION"
-	ReasonContextRotation        Reason = "CONTEXT_ROTATION_REQUIRED"
-	ReasonAccountDisabled        Reason = "ACCOUNT_DISABLED"
-	ReasonAccountDraining        Reason = "ACCOUNT_DRAINING"
-	ReasonProviderUnavailable    Reason = "PROVIDER_UNAVAILABLE"
-	ReasonProviderExhausted      Reason = "PROVIDER_EXHAUSTED"
-	ReasonModelNotFound          Reason = "MODEL_NOT_FOUND"
-	ReasonModelDisabled          Reason = "MODEL_DISABLED"
-	ReasonCapabilityMismatch     Reason = "CAPABILITY_MISMATCH"
-	ReasonModelContextTooSmall   Reason = "MODEL_CONTEXT_TOO_SMALL"
+	ReasonReusableSession      Reason = "REUSABLE_SESSION"
+	ReasonRetainedByHysteresis Reason = "RETAINED_BY_HYSTERESIS"
+	ReasonNoReusableSession    Reason = "NO_REUSABLE_SESSION"
+	ReasonContextRotation      Reason = "CONTEXT_ROTATION_REQUIRED"
+	ReasonAccountDisabled      Reason = "ACCOUNT_DISABLED"
+	ReasonAccountDraining      Reason = "ACCOUNT_DRAINING"
+	ReasonProviderUnavailable  Reason = "PROVIDER_UNAVAILABLE"
+	ReasonProviderExhausted    Reason = "PROVIDER_EXHAUSTED"
+	ReasonModelNotFound        Reason = "MODEL_NOT_FOUND"
+	ReasonModelDisabled        Reason = "MODEL_DISABLED"
+	ReasonCapabilityMismatch   Reason = "CAPABILITY_MISMATCH"
+	ReasonModelContextTooSmall Reason = "MODEL_CONTEXT_TOO_SMALL"
 )
 
 // Policy defines the reuse hysteresis. A session not already preferred must
@@ -66,11 +66,11 @@ func (p Policy) Validate() error {
 // become a routing candidate. WorkspaceFingerprint is already privacy-safe
 // provider-domain data; raw repository paths never enter this policy.
 type Request struct {
-	ModelID               harnessmodel.ProviderModelID
-	RequiredCapabilities  []string
-	WorkspaceFingerprint  string
-	RequiredContext       int64
-	PreferredSessionID    harnessmodel.ProviderSessionID
+	ModelID              harnessmodel.ProviderModelID
+	RequiredCapabilities []string
+	WorkspaceFingerprint string
+	RequiredContext      int64
+	PreferredSessionID   harnessmodel.ProviderSessionID
 }
 
 func (r Request) Validate() error {
@@ -146,15 +146,21 @@ func (s StoreSource) Snapshot(ctx context.Context, accountID harnessmodel.Provid
 		if err != nil {
 			return err
 		}
-		capacity, err := reader.GetLatestProviderCapacity(ctx, accountID)
-		if err != nil && !errors.Is(err, harnessstore.ErrNotFound) {
-			return err
+		capacity, capacityErr := reader.GetLatestProviderCapacity(ctx, accountID)
+		if capacityErr != nil && !errors.Is(capacityErr, harnessstore.ErrNotFound) {
+			return capacityErr
 		}
 
 		out.Account = account
 		out.Models = models
 		out.Sessions = sessions
-		if err == nil {
+		if capacityErr == nil {
+			if capacity.AccountID != account.ID || capacity.Provider != account.Provider {
+				return fmt.Errorf("provider capacity is inconsistent with account %s", account.ID)
+			}
+			if !capacity.Health.Valid() {
+				return fmt.Errorf("invalid provider capacity health %q", capacity.Health)
+			}
 			out.Health = capacity.Health
 		}
 		return nil
@@ -241,10 +247,6 @@ func Evaluate(snapshot Snapshot, request Request, policy Policy) (Decision, erro
 		// cannot be reused safely, rotate through CHECKPOINT_AND_NEW rather than
 		// silently abandoning that context.
 		rotationRequired = true
-		if snapshot.Account.State == harnessmodel.ProviderAccountDraining {
-			// Draining accounts may finish work in an already healthy session but
-			// must not acquire replacement sessions.
-		}
 		if session.State != harnessmodel.ProviderSessionActive || session.ContextLimit <= 0 {
 			continue
 		}
