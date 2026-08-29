@@ -10,9 +10,6 @@ import (
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 )
 
-// Source identifies how much historical specificity supported an estimate.
-// Lower-specificity sources are intentionally less confident, but they never
-// change the metric unit or cross provider boundaries.
 type Source string
 
 const (
@@ -25,9 +22,6 @@ const (
 	SourceUnavailable       Source = "UNAVAILABLE"
 )
 
-// Key describes one demand population. TaskClass is caller-defined (for
-// example implement/test/review), RepositoryID is a stable repository identity,
-// and ContextClass is an opaque caller taxonomy. Metric always stays native.
 type Key struct {
 	TaskClass    string
 	Provider     harnessmodel.ProviderKind
@@ -41,6 +35,9 @@ func (k Key) Validate() error {
 	if strings.TrimSpace(k.TaskClass) == "" {
 		return fmt.Errorf("demand task class is required")
 	}
+	if k.TaskClass != strings.TrimSpace(k.TaskClass) || k.RepositoryID != strings.TrimSpace(k.RepositoryID) || k.ContextClass != strings.TrimSpace(k.ContextClass) {
+		return fmt.Errorf("demand classification fields must be normalized")
+	}
 	if !k.Provider.Valid() {
 		return fmt.Errorf("invalid demand provider %q", k.Provider)
 	}
@@ -53,8 +50,6 @@ func (k Key) Validate() error {
 	return nil
 }
 
-// Sample is a classified immutable provider-usage observation. Amount is in the
-// exact native unit declared by Key.Metric.
 type Sample struct {
 	Key        Key
 	Amount     float64
@@ -77,16 +72,40 @@ func (s Sample) Validate() error {
 	return nil
 }
 
-// Policy bounds history and defines explicit operator-supplied cold starts.
-// ColdStart deliberately has no built-in token/request/cost values: inventing a
-// native-unit demand would violate unit-preserving routing semantics.
+// ColdStartKey scopes operator-supplied fallback demand. Empty TaskClass or
+// ModelID intentionally means a broader fallback within the same provider and
+// metric; provider and metric are never omitted, so cold starts cannot cross
+// provider or native-unit boundaries.
+type ColdStartKey struct {
+	TaskClass string
+	Provider  harnessmodel.ProviderKind
+	ModelID   harnessmodel.ProviderModelID
+	Metric    harnessmodel.QuotaMetricKind
+}
+
+func (k ColdStartKey) Validate() error {
+	if k.TaskClass != strings.TrimSpace(k.TaskClass) {
+		return fmt.Errorf("cold-start task class must be normalized")
+	}
+	if !k.Provider.Valid() {
+		return fmt.Errorf("invalid cold-start provider %q", k.Provider)
+	}
+	if !k.Metric.Valid() || k.Metric == harnessmodel.QuotaMetricOpaque {
+		return fmt.Errorf("cold-start metric %q is not estimable", k.Metric)
+	}
+	if len(k.TaskClass) > 128 || len(k.ModelID) > 256 {
+		return fmt.Errorf("cold-start classification field exceeds size limit")
+	}
+	return nil
+}
+
 type Policy struct {
 	MinSamples    int
 	TargetSamples int
 	MaxSamples    int
 	MaxAge        time.Duration
 	MaxFutureSkew time.Duration
-	ColdStart     map[harnessmodel.QuotaMetricKind]float64
+	ColdStart     map[ColdStartKey]float64
 }
 
 func DefaultPolicy() Policy {
@@ -96,7 +115,7 @@ func DefaultPolicy() Policy {
 		MaxSamples:    256,
 		MaxAge:        30 * 24 * time.Hour,
 		MaxFutureSkew: 5 * time.Minute,
-		ColdStart:     map[harnessmodel.QuotaMetricKind]float64{},
+		ColdStart:     map[ColdStartKey]float64{},
 	}
 }
 
@@ -113,22 +132,20 @@ func (p Policy) Validate() error {
 	if p.MaxAge <= 0 || p.MaxFutureSkew < 0 {
 		return fmt.Errorf("invalid demand age policy")
 	}
-	for metric, value := range p.ColdStart {
-		if !metric.Valid() || metric == harnessmodel.QuotaMetricOpaque {
-			return fmt.Errorf("cold-start metric %q is not estimable", metric)
+	for key, value := range p.ColdStart {
+		if err := key.Validate(); err != nil {
+			return err
 		}
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
-			return fmt.Errorf("cold-start demand for %s must be finite and non-negative", metric)
+			return fmt.Errorf("cold-start demand must be finite and non-negative")
 		}
-		if metric == harnessmodel.QuotaMetricFraction && value > 1 {
+		if key.Metric == harnessmodel.QuotaMetricFraction && value > 1 {
 			return fmt.Errorf("fractional cold-start demand must be within [0,1]")
 		}
 	}
 	return nil
 }
 
-// Estimate is a deterministic conservative view over one compatible native
-// metric. Reservation is intentionally p80 rather than the mean/p50.
 type Estimate struct {
 	Key         Key
 	Available   bool
@@ -142,8 +159,6 @@ type Estimate struct {
 	NewestAt    time.Time
 }
 
-// EstimateAt derives demand without shared mutable state. It is safe to invoke
-// concurrently as long as callers do not mutate the supplied sample slice.
 func EstimateAt(query Key, samples []Sample, now time.Time, policy Policy) (Estimate, error) {
 	if err := query.Validate(); err != nil {
 		return Estimate{}, err
@@ -180,9 +195,6 @@ func EstimateAt(query Key, samples []Sample, now time.Time, policy Policy) (Esti
 		if len(matched) > policy.MaxSamples {
 			sort.SliceStable(matched, func(i, j int) bool {
 				if matched[i].ObservedAt.Equal(matched[j].ObservedAt) {
-					// If a provider reports several samples with the same timestamp,
-					// retain the larger claims at the bounded-history boundary. Keeping
-					// smaller equal-time values would systematically underestimate p80.
 					return matched[i].Amount > matched[j].Amount
 				}
 				return matched[i].ObservedAt.After(matched[j].ObservedAt)
@@ -192,7 +204,7 @@ func EstimateAt(query Key, samples []Sample, now time.Time, policy Policy) (Esti
 		return summarize(query, candidate.source, matched, policy), nil
 	}
 
-	if value, ok := policy.ColdStart[query.Metric]; ok {
+	if value, ok := coldStartValue(query, policy.ColdStart); ok {
 		return Estimate{
 			Key: query, Available: true, Source: SourceColdStart,
 			P50: value, P80: value, Reservation: value, Confidence: sourceConfidence(SourceColdStart),
@@ -295,6 +307,26 @@ func nearestRank(sorted []float64, percentile float64) float64 {
 		rank = len(sorted)
 	}
 	return sorted[rank-1]
+}
+
+func coldStartValue(query Key, values map[ColdStartKey]float64) (float64, bool) {
+	keys := []ColdStartKey{
+		{TaskClass: query.TaskClass, Provider: query.Provider, ModelID: query.ModelID, Metric: query.Metric},
+		{TaskClass: query.TaskClass, Provider: query.Provider, Metric: query.Metric},
+		{Provider: query.Provider, ModelID: query.ModelID, Metric: query.Metric},
+		{Provider: query.Provider, Metric: query.Metric},
+	}
+	seen := map[ColdStartKey]struct{}{}
+	for _, key := range keys {
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		if value, ok := values[key]; ok {
+			return value, true
+		}
+	}
+	return 0, false
 }
 
 func sourceConfidence(source Source) float64 {
