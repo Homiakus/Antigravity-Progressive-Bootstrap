@@ -62,6 +62,9 @@ jobs:
       - name: Provider demand estimator smoke benchmark
         run: go test ./internal/harness/provider/demand -run '^$' -bench '^BenchmarkEstimate1000Samples$' -benchtime=1x -benchmem
 
+      - name: Provider session broker smoke benchmark
+        run: go test ./internal/harness/provider/session -run '^$' -bench '^BenchmarkEvaluate100Sessions$' -benchtime=1x -benchmem
+
       - name: Provider atomic reservation smoke benchmark
         run: go test ./internal/harness/store/sqlite -run '^$' -bench '^BenchmarkAtomicProviderReservation10KActiveClaims$' -benchtime=1x -benchmem
 
