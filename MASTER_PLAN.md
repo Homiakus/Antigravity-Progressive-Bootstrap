@@ -18,8 +18,8 @@ Current qualified milestones:
 - T-027 makes living-plan completion executable and workspace-bound.
 - T-028 separates coordinator and ordinary headless-worker authority; published as `595f0d002aaf97ee74472d0bdab84af14fcd0bab`.
 - T-029 makes publication/checkpoint evidence machine-verifiable; published as `d6fc97d19b2161db4256aafa839715d929a6eb95`.
-- T-010 conservative native-unit demand estimation is implemented and qualified on `ac57654508b79f260c58df556c1ff867fbe411d7`; publication is the current final action.
-- T-011 is now the highest-leverage READY task because it directly closes remaining Critical F-004 quota oversubscription by making capacity/claims/assignment/reservation one atomic writer transaction. T-008 remains independently READY and is required before T-012.
+- T-010 conservative native-unit demand estimation is published as `9d327e7e530eb940021c7a3dce11b9f33944d53f`; post-push Linux/Windows CI, race, vet and benchmarks PASS.
+- T-011 is IN_PROGRESS / P0 because it directly closes remaining Critical F-004 quota oversubscription by making capacity/claims/assignment/reservation one atomic writer transaction. T-008 remains independently READY and is required before T-012.
 
 ## 2. Architecture
 
@@ -116,8 +116,8 @@ Observation is first-class; portable execution waits for T-013/T-014.
 T-010 models demand in provider-native units independent of workflow spend. T-011 performs supply feasibility/reservation separately.
 
 ### F-004 — Durable claims exist but atomic quota reservation is incomplete
-**Status:** Partially resolved in T-005/T-010. **Severity:** Critical. **Confidence:** Confirmed.  
-T-005 added typed durable assignments/reservations and complete ACTIVE-claim reads; T-010 now supplies conservative compatible-unit demand. T-011 must atomically read latest capacity + all non-expired ACTIVE claims + feasibility + assignment/reservation in one writer transaction to close oversubscription.
+**Status:** IN PROGRESS via T-011. **Severity:** Critical. **Confidence:** Confirmed.  
+T-005 added typed durable assignments/reservations and complete ACTIVE-claim reads; T-010 supplies conservative compatible-unit demand. T-011 now owns the single-writer transaction that must atomically read latest capacity + all non-expired ACTIVE compatible claims + normalized feasibility + assignment/reservation.
 
 ### F-005 — Existing worker/lease subsystem must be reused
 **Status:** Resolved by architecture. **Severity:** High.  
@@ -233,7 +233,7 @@ Completion now requires latest complete repository-resident checkpoint bound to 
 
 ### F-033 — Durable usage rows do not carry authoritative task/repository/context classification
 **Status:** Resolved by boundary in T-010; integration requirement remains. **Category:** Provider Demand / Attribution. **Severity:** High. **Confidence:** Confirmed.  
-`ProviderUsageSample` durably and idempotently stores assignment/account/model/metric/amount/time, but not semantic task class, repository identity or context class. Inferring those from opaque IDs, names or transcript text would contaminate estimator populations. T-010 therefore introduces explicit `UsageClassification`, a lossless `ProviderUsageSample -> demand.Sample` adapter and a `HistorySource` contract whose implementations must obtain classification from authoritative execution/workspace linkage. T-011/T-012 integration may provide such a loader, but must not weaken this boundary or add guessed affinity.
+`ProviderUsageSample` durably and idempotently stores assignment/account/model/metric/amount/time, but not semantic task class, repository identity or context class. T-010 requires explicit `UsageClassification`; T-011/T-012 must not infer those dimensions from opaque identifiers.
 
 ## 5. Risk Register
 
@@ -261,8 +261,8 @@ T001 DONE -> T002 DONE -> T003 DONE -> T004 DONE
                                       |-> T005 DONE
 T004,T006,T007 -> T008 READY
 T004,T006,T007 -> T009 DONE
-T005,T009 -> T010 DONE -> T011 READY -> T012
-T008 -------------------------------------> T012
+T005,T009 -> T010 DONE -> T011 IN_PROGRESS -> T012
+T008 ------------------------------------------> T012
 T012 -> T013 -> T014 -> T015
 T013,T015 -> T016 -> T017 -> T018 -> T019
 T012 -> T020
@@ -276,11 +276,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-010 publication:
+Priority now:
 
-1. **T-011 P0 / NEXT** — closes Critical F-004 with an atomic reservation transaction; all prerequisites are now complete.
+1. **T-011 P0 / IN_PROGRESS** — closes Critical F-004 with atomic reservation transaction.
 2. **T-008 P1** — independent session broker required before T-012.
-3. **T-030 P1** — structural plan/process audit; valuable but lower risk leverage than active Critical F-004.
+3. **T-030 P1** — structural plan/process audit.
 
 ## 7. Atomic Tasks
 
@@ -315,21 +315,22 @@ REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE from context headroom, affinity, health
 Unit-preserving headroom, freshness/confidence decay, reset expiry, exhaustion-proof separation, malformed telemetry rejection and provider-adapter integration.
 
 ### T-010 — Add conservative demand estimator
-**Status:** DONE / VERIFIED, publication pending. **Priority:** P1 / HIGH LEVERAGE.  
-**Root cause:** T-011 had durable claims and normalized supply but no conservative demand quantity in the same native units; mean/guessed fraction arithmetic could under-reserve and recreate oversubscription.  
-**Protected surface:** no v15 migration change, scheduler/selector mutation, provider capacity rewrite or new mutable global subsystem.  
-**Policy core:** stateless `provider/demand` package; normalized `Key` over task/provider/model/repository/context/metric; finite non-negative samples; FRACTION bounded; OPAQUE rejected; stale/far-future evidence excluded; empirical nearest-rank p50/p80; reservation=p80; bounded newest history; equal-time truncation retains larger claims to avoid downward bias; deterministic input-order independence.  
-**Fallback:** EXACT -> without context -> without repository -> without model -> provider+metric. Provider and metric never broaden. Confidence decreases with both insufficient sample count and reduced specificity.  
-**Cold start:** no built-in magic demand. Explicit operator values use `ColdStartKey`; fallback may broaden task/model only inside the same provider+metric. Cross-provider and cross-metric cold starts are impossible by lookup contract.  
-**Durable feedback boundary:** `SampleFromUsage` losslessly preserves durable ModelID/Metric/Amount/ObservedAt while requiring explicit authoritative task/provider/repository/context classification. `HistorySource` provides bounded classified history and may return up to `MaxSamples` per specificity population; `Estimator` rejects an unbounded union and propagates cancellation/read failure. No guessed classification or schema migration.  
-**Characterization/regressions:** two early CI failures were correctly localized as test defects rather than production failures: one missing fuzz-test brace and one hand-calculated p80 expectation (`ceil(.8*8)=7 -> 110`). Self-review found/fixed equal-timestamp downward truncation, over-broad metric-only cold start, and a global history-source bound that could starve broad fallback populations.  
-**Edge/property/mutation:** exact/fallback populations, provider/metric isolation, insufficient history, cold start, FRACTION/OPAQUE, stale/future, bounded recency, equal timestamps, permutation determinism, NaN/Inf, specificity confidence, source cancellation/failure/bounds; fuzz proves FRACTION reservation remains [0,1] and p80>=p50. Sentinels kill reservation=p50, cross-provider cold-start and low-value equal-time truncation mutants.  
-**Performance:** `BenchmarkEstimate1000Samples` smoke baseline on GitHub Linux runner: ~231,748 ns/op, ~397,272 B/op, 11 allocs/op on qualification-family run; bounded CI benchmark now precedes existing compiler/store/scheduler/retry/wait smoke gates. Optimization is deferred unless T-011/T-012 profiling shows estimator cost material.  
-**Verification:** qualification head `ac57654508b79f260c58df556c1ff867fbe411d7`: targeted process gates PASS; `go test ./...` PASS; `go test -race ./...` PASS; `go vet ./...` PASS; demand benchmark PASS; all existing harness benchmarks PASS; Windows targeted/full PASS. Dependencies: T-005,T-009. Resolves demand portion of F-003/F-004 and establishes boundary F-033.
+**Status:** DONE / VERIFIED / PUBLISHED. **Priority:** P1 / HIGH LEVERAGE. Publication `9d327e7e530eb940021c7a3dce11b9f33944d53f`.  
+Pure nearest-rank p50/p80 estimator; reservation=p80; bounded history; provider/metric isolation; scoped explicit cold start; usage-classification boundary; HistorySource; FRACTION/OPAQUE safety; fuzz/mutation sentinels; Linux/Windows/race/vet/benchmarks PASS.
 
 ### T-011 — Implement atomic provider reservations
-**Status:** READY. **Priority:** P0. **Leverage:** CRITICAL.  
-Single existing SQLite writer transaction: latest compatible capacity + complete non-expired ACTIVE reservations -> normalize compatible native unit -> subtract complete claims -> require conservative T-010 demand feasibility -> append ACTIVE assignment + reservation atomically. Expiry/release/settlement; conflict/failure rollback; 100+ concurrent reserver proof. Reuse existing single-writer pool + SQL FK/CHECK/partial-UNIQUE/CAS; do not create a parallel mutex/lock service. Preserve I-020/I-021/I-025/I-027/I-035. A zero demand estimate must have explicit semantics (no fabricated positive claim; do not create an invalid zero-amount reservation). Dependencies: T-005,T-009,T-010.
+**Status:** IN_PROGRESS. **Priority:** P0. **Leverage:** CRITICAL.  
+**Dependencies:** T-005,T-009,T-010 are DONE and published.  
+**Root cause:** normalized provider supply, conservative demand and durable claims exist, but feasibility + claim accounting + assignment/reservation creation are not yet one atomic operation; parallel selectors can therefore race and oversubscribe the same capacity.  
+**Protected surface:** released v15 migration/checksums are immutable; do not add a parallel mutex/distributed-lock subsystem; do not rewrite capacity normalization, demand percentile semantics, scheduler, worker lease or provider adapters unless a proven defect requires it.  
+**Transaction boundary:** reuse `store.Store.Update`. SQLite already serializes in-process writes through its authoritative writer (`MaxOpenConns(1)`); SQL FK/CHECK/partial-UNIQUE/CAS remain the durable invariant layer.  
+**Atomic operation:** inside one `Update`, read latest exact capacity, normalize at the same decision time, read the complete non-expired ACTIVE reservation set, filter only semantically compatible claims, compute claimed native quantity, require `available >= demand.Reservation`, then append ACTIVE assignment and reservation as one commit. Any stale/unusable capacity, incompatible unit/scope, insufficient headroom, uniqueness/idempotency conflict, or write failure rolls back both.  
+**Open characterization questions before implementation:** (1) zero-demand semantics: assignment-only versus explicit zero claim; default preference is assignment-only if invariants permit, never fabricate positive demand; (2) retry/idempotency: same semantic request must return/recover the existing active assignment+reservation while conflicting replay fails closed; (3) claim compatibility must be capacity-key/window/model/account exact enough to avoid subtracting unrelated windows while never undercounting overlapping claims; (4) reservation expiry must not outlive the evidence window/reset boundary.  
+**Edge-space:** provider × account × model-scope × metric × capacity key/window × fresh/stale/reset boundary × demand 0/epsilon/equal/headroom+epsilon × active/expired claims × same/different key × concurrent attempts × replay/conflict × cancellation/rollback.  
+**Tests:** exact feasible reservation; insufficient capacity rollback; stale/reset-boundary refusal; OPAQUE/incompatible metric refusal; model-scope mismatch; complete-claim subtraction; expired claims excluded; zero-demand explicit behavior; idempotent replay/conflicting replay; injected second-write failure proves assignment rollback; 100+ concurrent reservers cannot exceed normalized supply; cancellation; Windows.  
+**Mutation/test-of-tests:** kill mutants that move reads outside transaction, use paged reservations, omit one compatible claim, compare against raw rather than normalized capacity, skip reservation write, accept metric/model/key mismatch, change `>=` boundary, include expired claim, permit stale equality, or allow replay to create a second ACTIVE assignment.  
+**Performance:** benchmark 10k ACTIVE claims and 100+ contention; establish bounded baseline without optimizing away correctness.  
+**Acceptance:** no execution-visible ACTIVE provider assignment may be committed unless its required claim is atomically feasible and persisted (except explicitly defined zero-demand assignment-only semantics); concurrent successful reservations never exceed the compatible normalized headroom snapshot.
 
 ### T-012 — Add explainable shadow selector
 **Status:** TODO. **Priority:** P0.  
@@ -400,7 +401,7 @@ Structured publication proof, independent read-only Git verifier, main/head/tree
 
 ### T-030 — Add structural `MASTER_PLAN.md` audit and process metrics
 **Status:** TODO. **Priority:** P1.  
-Unique T/F IDs, allowed statuses, at most one coordinator `IN_PROGRESS`, dependency validity, unknown-high finding detection, checkpoint recoverability and machine-readable process metrics without Goodhart optimization. Add a process rule/test that the first task-specific branch write records selected T-XXX as `IN_PROGRESS` with its pre-flight before production edits; T-010 exposed that verbal/precomputed pre-flight alone is not equivalent to a durable start marker. Dependencies: T-027,T-028,T-029.
+Unique T/F IDs, allowed statuses, at most one coordinator `IN_PROGRESS`, dependency validity, unknown-high finding detection, checkpoint recoverability and machine-readable process metrics without Goodhart optimization. Enforce that the first task-specific branch write records selected T-XXX as `IN_PROGRESS` with pre-flight before production edits. Dependencies: T-027,T-028,T-029.
 
 ## 8. Verification, Mutation and Performance Policy
 
@@ -414,7 +415,8 @@ Process/provider mutation sentinels are executable requirements:
 - granting any coordinator-only authority bit to T-028 worker must fail;
 - mutating T-029 publication branch/head/remote/tree/ancestor/clean/no-force semantics must fail;
 - omitting any required repository checkpoint field or substituting stale task checkpoint must fail;
-- T-010 reservation must remain p80, provider/metric boundaries cannot broaden, equal-time truncation cannot prefer low claims, and FRACTION estimates remain bounded.
+- T-010 reservation must remain p80, provider/metric boundaries cannot broaden, equal-time truncation cannot prefer low claims, and FRACTION estimates remain bounded;
+- T-011 transaction/complete-claim/native-unit/rollback boundaries must be protected by concurrency and mutation sentinels.
 
 Performance baseline: do not materially regress harness smoke benchmarks. T-010 establishes a 1000-sample estimator smoke benchmark. T-011 adds 100+ concurrent reservation contention and large active-claim measurement; later T-012 adds selector-scale benchmarks.
 
@@ -422,7 +424,7 @@ Performance baseline: do not materially regress harness smoke benchmarks. T-010 
 
 Credentials never enter plan/telemetry. Provider payloads and demand samples are bounded/validated; logs redact auth/session material. Remote-worker trust never implies credential or main-write authority. Unknown engineering roles fail closed. Publication verification is read-only and cannot mutate Git state. Demand classification cannot be guessed from opaque IDs. Only final fenced Commit Coordinator may autonomously write `main`; T-019 must enforce this independently of prompt compliance.
 
-Every intermediate state keeps `main` buildable and compatible. Released SQLite migrations remain immutable. T-010 adds no persistence migration or public provider-state mutation; estimator/history interfaces are additive internal contracts.
+Every intermediate state keeps `main` buildable and compatible. Released SQLite migrations remain immutable. T-011 must use existing store/transaction and v15 runtime contracts; no migration or public provider-state rewrite is authorized by pre-flight.
 
 ## 10. Migration and Rollout
 
@@ -482,7 +484,7 @@ Engineering-process path:
 - T-027 `e154def6a181be2f6120aafa4fb1358fba63ac22`
 - T-028 `595f0d002aaf97ee74472d0bdab84af14fcd0bab`
 - T-029 `d6fc97d19b2161db4256aafa839715d929a6eb95`
-- T-010 qualification `ac57654508b79f260c58df556c1ff867fbe411d7`; publication commit becomes authoritative after final reconciled fast-forward.
+- T-010 `9d327e7e530eb940021c7a3dce11b9f33944d53f`
 
 ## 13. Recent Iteration Log
 
@@ -496,37 +498,35 @@ Typed coordinator/worker authority and planner propagation. Coordinator-authorit
 Machine-observed publication proof and complete repository-resident checkpoint. Full Linux/Windows tests, race, vet and benchmark smoke PASS. Published `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 
 ### Iteration 12 — T-010
-**Selected task:** T-010 by dependency/risk leverage.  
-**Why:** T-011 could not safely reserve capacity without conservative compatible-unit demand; closing T-010 is the shortest path to Critical F-004.  
-**Finding:** F-033 — usage rows lack authoritative semantic classification; inference is prohibited and an explicit classification/history boundary was added.  
-**Changes:** pure nearest-rank p50/p80 estimator; p80 reservation; bounded recency; specificity fallback/confidence; provider/metric isolation; scoped explicit cold start; durable usage adapter; bounded/cancellable HistorySource service; CI benchmark.  
-**Unexpected defects caught before publication:** fuzz-test syntax typo; incorrect hand-computed nearest-rank expected value; equal-time truncation downward bias; over-broad cold-start key; globally bounded history contract starving broader fallback. All were fixed at root contract/test level before qualification.  
-**Tests:** population hierarchy/isolation, cold-start scoping, stale/future, recency, equal-time boundary, determinism, malformed floats, usage attribution, source bounds/failures/cancellation, FRACTION fuzz, mutation sentinels and full Harness CI.  
-**Verification:** head `ac57654508b79f260c58df556c1ff867fbe411d7` — Linux full/race/vet + estimator and legacy benchmarks PASS; Windows targeted/full PASS.  
-**Performance:** 1000-sample baseline ~232 µs/op, ~397 KB/op, 11 allocs/op on GitHub Linux qualification-family run; accepted as bounded initial baseline.  
-**Compatibility/security:** no migration; no credential/network change; no guessed classification; OPAQUE/nonfinite invalid; provider boundaries preserved.  
-**Process review:** pre-flight reasoning happened before production edits, but the branch did not persist an `IN_PROGRESS` plan marker as its first task-specific commit. T-030 is tightened to make the durable start marker executable; future iterations must write selected T-XXX + pre-flight before production changes.  
-**Plan result:** I-035/F-033; T-010 DONE/VERIFIED; T-011 READY/NEXT.  
-**Publication:** final reconciled head must pass full CI, then re-read remote `main` and publish one logical fast-forward commit; no force.
+Conservative native-unit p80 demand estimator, scoped explicit cold starts, classified history boundary, fuzz/mutation sentinels and benchmark. Qualification/reconciliation passed Linux/Windows full CI, race, vet and benchmarks; one logical fast-forward publication `9d327e7e530eb940021c7a3dce11b9f33944d53f`; post-push CI PASS.
+
+### Iteration 13 — T-011 / STARTED
+**Selected task:** T-011 by Critical F-004 risk leverage.  
+**Durable pre-flight:** this is the first task-specific branch write; no production file preceded it.  
+**Base:** `main@9d327e7e530eb940021c7a3dce11b9f33944d53f`, branch `provider-reservation-t011`.  
+**Root cause:** reservation feasibility is not yet one atomic write transaction.  
+**Protected surface:** v15 immutable; no parallel lock subsystem; capacity/demand semantics preserved.  
+**Characterization target:** Store.Update transaction implementation, exact capacity-key compatibility, complete active claim semantics, zero-demand, replay/conflict and expiry/reset coupling.  
+**Required proof:** rollback, native-unit compatibility, complete claims, stale/reset boundaries, idempotency/conflict, 100+ concurrency, race, mutation sentinels, 10k-claim benchmark, Windows.
 
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
-## 15. Context Compression Checkpoint — after T-010
+## 15. Context Compression Checkpoint — after T-010 / T-011 started
 
-`CURRENT HEAD:` T-010 final publication commit becomes authoritative only after this reconciled plan passes full CI and fast-forward publication.  
-`CURRENT QUALIFIED MILESTONE:` provider capacity has coherent observation, native-unit normalization, durable assignment/reservation/usage ledger and conservative native-unit p80 demand estimation; atomic reservation is now unblocked.  
-`ARCHITECTURE:` `internal/harness/provider/demand` owns pure demand policy, explicit usage classification and bounded history-source contract; SQLite v15 remains unchanged; T-011 will execute feasibility and reservation inside the existing single-writer SQLite transaction; process/publication layers remain orthogonal.  
-`CRITICAL INVARIANTS:` I-005/I-020/I-021/I-023..I-027/I-035 plus I-008/I-009/I-033/I-034 for publication.  
-`COMPLETED THIS ITERATION:` T-010.  
-`RESOLVED FINDINGS:` F-033 boundary resolved; demand portions of F-003/F-004 reduced.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-004 until T-011 atomic reservations; F-007 until T-018/T-019; F-014 residual until T-018/T-019; F-001/F-002/F-003/F-008/F-009 remain dependency-chain work.  
-`BLOCKERS:` none for T-011.  
-`NEXT TASK:` T-011.  
-`WHY NEXT:` every T-011 prerequisite is now DONE, and T-011 directly closes Critical F-004 quota oversubscription; its risk leverage outranks T-008/T-030.  
-`CRITICAL FILES:` `internal/harness/store/sqlite/db.go`, `provider_runtime_store.go`, provider capacity normalization, `internal/harness/provider/demand/*`, provider runtime models/store contracts, `MASTER_PLAN.md`; released migrations are protected/immutable.  
-`VERIFICATION COMMANDS:` first persist T-011 IN_PROGRESS + pre-flight; characterize current claim/capacity queries; targeted transaction/rollback/unit-compatibility tests; 100+ concurrent reserver test; race/property/mutation boundary tests; `go test ./...`; `go test -race ./...`; `go vet ./...`; reservation benchmark + existing smoke benchmarks; Windows full tests.  
-`IMPORTANT DECISIONS:` p80 is reservation demand; no implicit cold-start constants; no cross-provider/metric fallback; no inferred usage classification; T-011 reuses existing SQLite one-writer pool and SQL invariants instead of parallel locking.  
-`REJECTED OPTIONS:` mean/p50 reservation; guessed fractions; cross-provider history/cold start; heuristic task/repository/context attribution; global fallback-history cap; v15 rewrite; new lock subsystem.  
-`NEW PROCESS LEARNING:` percentile expectations must be mechanically derived/tested rather than hand-waved; conservative truncation needs tie semantics; source bounds must be defined per population; and a verbal pre-flight is insufficient process evidence unless the selected T-XXX `IN_PROGRESS` marker is persisted before production edits.
+`CURRENT HEAD:` `main@9d327e7e530eb940021c7a3dce11b9f33944d53f`; T-011 feature branch starts from this exact published/verified commit.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, native-unit normalization, durable runtime ledger and conservative p80 demand estimation are published; atomic reservation is the active gap.  
+`ARCHITECTURE:` `provider/demand` owns demand; existing `store.Store.Update`/SQLite single writer is T-011 transaction authority; v15 models/constraints remain unchanged.  
+`CRITICAL INVARIANTS:` I-005/I-020/I-021/I-023..I-027/I-035 plus I-008/I-009/I-033/I-034.  
+`COMPLETED THIS ITERATION:` latest completed task is T-010; T-011 is IN_PROGRESS, not complete.  
+`RESOLVED FINDINGS:` F-033 boundary resolved; T-010 demand portion of F-004 complete.  
+`OPEN CRITICAL/HIGH FINDINGS:` F-004 active via T-011; F-007/F-014 residual until T-018/T-019; F-001/F-002/F-003/F-008/F-009 remain dependency-chain work.  
+`BLOCKERS:` none.  
+`NEXT TASK:` T-011 currently active.  
+`WHY NEXT:` all prerequisites are DONE and it directly closes Critical quota oversubscription.  
+`CRITICAL FILES:` `internal/harness/store/store.go`, `internal/harness/store/sqlite/db.go`, `provider_store.go`, `provider_runtime_store.go`, provider capacity normalization, `internal/harness/provider/demand/*`, provider runtime models, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` targeted transaction tests -> concurrent reserver/race/property/mutation tests -> `go test ./...` -> `go test -race ./...` -> `go vet ./...` -> reservation/legacy benchmarks -> Windows full tests.  
+`IMPORTANT DECISIONS:` p80 demand; native units only; complete claim set; normalized capacity; single existing writer transaction; no guessed classification; fail closed on stale/unusable evidence.  
+`REJECTED OPTIONS:` paged claims, raw-capacity comparison, separate mutex/lock service, v15 rewrite, cross-unit summing, invented demand, heuristic attribution.  
+`NEW PROCESS LEARNING:` T-011 corrects T-010 process debt: selected task + pre-flight are now persisted as the first branch change before production code.
