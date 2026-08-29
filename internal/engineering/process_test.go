@@ -19,7 +19,10 @@ func writePlan(t *testing.T, root, taskStatus string) {
 
 ### T-027 — Enforce living engineering process
 **Status:** ` + taskStatus + `. **Priority:** P0.
-`
+
+### Context Compression Checkpoint — after T-027
+
+` + checkpointFields("T-027")
 	if err := os.WriteFile(filepath.Join(root, PlanFileName), []byte(plan), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -42,8 +45,8 @@ func completeEvidence() []string {
 		"self-review:root cause fixed without duplicate source of truth",
 		"plan-reconcile:MASTER_PLAN updated with task, findings and iteration result",
 		"process-review:missing completion categories and ambient cwd coupling are now executable guards",
-		"push-main:remote main head verified after normal push",
-		"checkpoint:continuation state recorded in MASTER_PLAN",
+		"push-main:" + validPublicationProofText(),
+		"checkpoint:plan",
 	}
 }
 
@@ -120,6 +123,36 @@ func TestValidateCompletionRequiresDeclaredDoneTaskAndBindsPlanDigest(t *testing
 	}
 	if len(got.FindingIDs) != 2 || got.FindingIDs[0] != "F-027" || got.FindingIDs[1] != "F-028" {
 		t.Fatalf("unexpected finding linkage: %v", got.FindingIDs)
+	}
+}
+
+func TestValidateCompletionRejectsFreeFormPublicationClaim(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "DONE")
+	evidence := completeEvidence()
+	for i := range evidence {
+		if strings.HasPrefix(evidence[i], "push-main:") {
+			evidence[i] = "push-main:verified"
+		}
+	}
+	_, err := ValidateCompletion(root, evidence)
+	if err == nil || !strings.Contains(err.Error(), "publication proof") {
+		t.Fatalf("expected structured publication proof error, got %v", err)
+	}
+}
+
+func TestValidateCompletionRejectsFreeFormCheckpointClaim(t *testing.T) {
+	root := t.TempDir()
+	writePlan(t, root, "DONE")
+	evidence := completeEvidence()
+	for i := range evidence {
+		if strings.HasPrefix(evidence[i], "checkpoint:") {
+			evidence[i] = "checkpoint:recorded elsewhere"
+		}
+	}
+	_, err := ValidateCompletion(root, evidence)
+	if err == nil || !strings.Contains(err.Error(), "checkpoint:plan") {
+		t.Fatalf("expected repository checkpoint proof error, got %v", err)
 	}
 }
 

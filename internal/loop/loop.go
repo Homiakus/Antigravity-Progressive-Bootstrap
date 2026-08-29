@@ -186,8 +186,8 @@ Mandatory immediate behavior:
 6. verify from cheap targeted checks upward; classify failures instead of retrying blindly;
 7. attack the solution with edge-space, security, concurrency/persistence and mutation/test-of-tests thinking where applicable;
 8. reconcile findings/tasks/dependencies and improve the process mechanism that allowed late detection;
-9. inspect the final diff and re-check remote main before publication;
-10. push only a qualified state to main without force, verify remote HEAD, write the context checkpoint, then continue to the next task unless convergence/blocker rules stop the loop.
+9. inspect the final diff, finalize the repository-resident Context Compression Checkpoint, and record the current remote-main base plus the qualified tree SHA;
+10. commit/push only that qualified tree to main without force, verify remote HEAD, then call state complete so agctl independently verifies the publication before continuing.
 
 Before your final answer, call this program through the terminal to record verified completion. In a repository containing MASTER_PLAN.md, every --verify category required by the living-plan contract must be present with real evidence or a reasoned not-applicable explanation:
 %s state complete --conversation %q --task-id %q --summary "<concise summary>" \
@@ -206,10 +206,10 @@ Before your final answer, call this program through the terminal to record verif
   --verify "self-review:<adversarial architecture/simplification result>" \
   --verify "plan-reconcile:<MASTER_PLAN reconciliation>" \
   --verify "process-review:<detection/prevention/feedback/automation learning>" \
-  --verify "push-main:<normal push + verified remote HEAD>" \
-  --verify "checkpoint:<context compression checkpoint>"
+  --verify "push-main:branch=main;head=<published HEAD>;remote=origin;remote-head=<observed remote main HEAD>;base=<pre-publication main HEAD>;qualified-tree=<qualified tree SHA>;force=false" \
+  --verify "checkpoint:plan"
 
-Only use verification entries for checks that actually ran. In managed repositories, the referenced T-XXX must exist in MASTER_PLAN.md and be DONE; referenced F-XXX IDs must also exist. The completion gate appends the SHA-256 digest of MASTER_PLAN.md so the checkpoint is bound to the reviewed plan revision.
+Only use verification entries for checks that actually ran. In managed repositories, the referenced T-XXX must exist in MASTER_PLAN.md and be DONE; referenced F-XXX IDs must also exist. The latest Context Compression Checkpoint in MASTER_PLAN.md must describe the same task. agctl independently observes local/remote main, fast-forward ancestry, qualified tree and clean worktree using read-only git commands; it never performs the push. The completion gate appends observed publication evidence plus the SHA-256 digest of MASTER_PLAN.md.
 
 If completion is genuinely impossible without an unavailable secret, external authorization, quota, required physical resource, or a non-inferable irreversible product decision, record a blocker instead:
 %s state block --conversation %q --task-id %q --summary "<exact external blocker>"
@@ -218,6 +218,11 @@ Do NOT classify normal build/test/lint failures, missing dev dependencies, codin
 }
 
 func MarkComplete(p paths.Paths, conversation, taskID, summary string, verification []string) error {
+	verifier := engineering.NewGitPublicationVerifier()
+	return markComplete(p, conversation, taskID, summary, verification, verifier)
+}
+
+func markComplete(p paths.Paths, conversation, taskID, summary string, verification []string, verifier engineering.PublicationVerifier) error {
 	st, ok, err := LoadState(p, conversation)
 	if err != nil {
 		return err
@@ -249,6 +254,38 @@ func MarkComplete(p paths.Paths, conversation, taskID, summary string, verificat
 		return err
 	}
 	clean = validated.Verification
+	if validated.Managed {
+		if verifier == nil {
+			return fmt.Errorf("managed completion requires a publication verifier")
+		}
+		pushValues := validated.Categories["push-main"]
+		if len(pushValues) != 1 {
+			return fmt.Errorf("managed completion requires exactly one publication proof")
+		}
+		proof, err := engineering.ParsePublicationProof(pushValues[0])
+		if err != nil {
+			return err
+		}
+		repoRoot := filepath.Dir(validated.PlanPath)
+		observed, err := verifier.Verify(repoRoot, proof)
+		if err != nil {
+			return fmt.Errorf("verify published main: %w", err)
+		}
+		// Keep the plan digest as the final evidence item for stable checkpoint
+		// consumers while recording independently observed publication state.
+		if len(clean) == 0 || !strings.HasPrefix(clean[len(clean)-1], "plan-digest:") {
+			return fmt.Errorf("managed completion lost plan digest binding")
+		}
+		digest := clean[len(clean)-1]
+		clean = clean[:len(clean)-1]
+		clean = append(clean,
+			"publication-verified:"+observed.Head,
+			"publication-tree:"+observed.Tree,
+			"publication-remote:"+observed.RemoteHead,
+			"checkpoint-verified:plan:"+validated.TaskID,
+			digest,
+		)
+	}
 	st.Complete = true
 	st.Verified = true
 	st.HardBlocker = false
