@@ -146,6 +146,7 @@ func (s Service) Reserve(ctx context.Context, req Request) (Result, error) {
 		if activeErr == nil {
 			return replayExisting(ctx, tx, req, windows, activeAssignment, &result)
 		}
+
 		// A terminal historical record with the same id makes the caller's
 		// idempotency identity stale; never resurrect it as a new generation.
 		if prior, err := tx.GetProviderAssignment(ctx, req.AssignmentID); err == nil {
@@ -154,20 +155,30 @@ func (s Service) Reserve(ctx context.Context, req Request) (Result, error) {
 			return fmt.Errorf("read provider assignment identity: %w", err)
 		}
 
-		allClaims, err := tx.ListAllActiveProviderReservations(ctx, req.AccountID, req.DecisionAt)
-		if err != nil {
-			return fmt.Errorf("read complete active provider claims: %w", err)
-		}
-		claims, err := evaluateClaims(req.AssignmentID, windows, allClaims, req.Demand.Reservation, req.DecisionAt, s.Policy)
+		claims, err := evaluateClaimsFromStore(
+			ctx,
+			tx,
+			req.AccountID,
+			req.AssignmentID,
+			windows,
+			req.Demand.Reservation,
+			req.DecisionAt,
+			s.Policy,
+		)
 		if err != nil {
 			return err
 		}
 
 		assignment := harnessmodel.ProviderAssignment{
-			ID: req.AssignmentID, AttemptID: req.AttemptID, AccountID: req.AccountID,
-			ModelID: req.ModelID, SessionID: req.SessionID,
-			State: harnessmodel.ProviderAssignmentActive, Revision: 1,
-			CreatedAt: req.DecisionAt, UpdatedAt: req.DecisionAt,
+			ID:        req.AssignmentID,
+			AttemptID: req.AttemptID,
+			AccountID: req.AccountID,
+			ModelID:   req.ModelID,
+			SessionID: req.SessionID,
+			State:     harnessmodel.ProviderAssignmentActive,
+			Revision:  1,
+			CreatedAt: req.DecisionAt,
+			UpdatedAt: req.DecisionAt,
 		}
 		if err := tx.CreateProviderAssignment(ctx, assignment); err != nil {
 			if errors.Is(err, harnessstore.ErrConflict) {
@@ -181,10 +192,18 @@ func (s Service) Reserve(ctx context.Context, req Request) (Result, error) {
 			for i := range claims {
 				claim := &claims[i]
 				reservation := harnessmodel.ProviderReservation{
-					ID: claim.ReservationID, AssignmentID: assignment.ID, AccountID: assignment.AccountID,
-					WindowID: claim.WindowID, ModelID: claim.ModelID, Metric: claim.Metric,
-					Amount: req.Demand.Reservation, State: harnessmodel.ProviderReservationActive, Revision: 1,
-					CreatedAt: req.DecisionAt, ExpiresAt: claim.ExpiresAt, UpdatedAt: req.DecisionAt,
+					ID:           claim.ReservationID,
+					AssignmentID: assignment.ID,
+					AccountID:    assignment.AccountID,
+					WindowID:     claim.WindowID,
+					ModelID:      claim.ModelID,
+					Metric:       claim.Metric,
+					Amount:       req.Demand.Reservation,
+					State:        harnessmodel.ProviderReservationActive,
+					Revision:     1,
+					CreatedAt:    req.DecisionAt,
+					ExpiresAt:    claim.ExpiresAt,
+					UpdatedAt:    req.DecisionAt,
 				}
 				if err := tx.CreateProviderReservation(ctx, reservation); err != nil {
 					return fmt.Errorf("create provider reservation for window %s: %w", claim.WindowID, err)
@@ -291,13 +310,82 @@ func effectiveAvailable(window capacity.Window) (float64, bool) {
 	}
 }
 
-func evaluateClaims(assignmentID harnessmodel.ProviderAssignmentID, windows []capacity.Window, reservations []harnessmodel.ProviderReservation, amount float64, now time.Time, policy Policy) ([]WindowClaim, error) {
+func evaluateClaimsFromStore(
+	ctx context.Context,
+	tx harnessstore.Reader,
+	accountID harnessmodel.ProviderAccountID,
+	assignmentID harnessmodel.ProviderAssignmentID,
+	windows []capacity.Window,
+	amount float64,
+	now time.Time,
+	policy Policy,
+) ([]WindowClaim, error) {
+	if aggregator, ok := tx.(harnessstore.ActiveProviderReservationAggregator); ok {
+		return evaluateAggregatedClaims(ctx, aggregator, accountID, assignmentID, windows, amount, now, policy)
+	}
+
+	reservations, err := tx.ListAllActiveProviderReservations(ctx, accountID, now)
+	if err != nil {
+		return nil, fmt.Errorf("read complete active provider claims: %w", err)
+	}
+	return evaluateClaims(assignmentID, windows, reservations, amount, now, policy)
+}
+
+func evaluateAggregatedClaims(
+	ctx context.Context,
+	aggregator harnessstore.ActiveProviderReservationAggregator,
+	accountID harnessmodel.ProviderAccountID,
+	assignmentID harnessmodel.ProviderAssignmentID,
+	windows []capacity.Window,
+	amount float64,
+	now time.Time,
+	policy Policy,
+) ([]WindowClaim, error) {
 	claims := make([]WindowClaim, 0, len(windows))
 	for _, window := range windows {
-		available, ok := effectiveAvailable(window)
-		if !ok || math.IsNaN(available) || math.IsInf(available, 0) || available < 0 {
-			return nil, fmt.Errorf("window %s has invalid effective headroom: %w", window.ID, ErrCapacityUnavailable)
+		totals, err := aggregator.ListActiveProviderReservationTotalsByWindow(ctx, accountID, window.ID, now)
+		if err != nil {
+			return nil, fmt.Errorf("aggregate active provider claims for window %s: %w", window.ID, err)
 		}
+
+		claimed := 0.0
+		matched := false
+		for _, total := range totals {
+			if total.WindowID != window.ID {
+				return nil, fmt.Errorf("aggregate returned unexpected window %s for %s: %w", total.WindowID, window.ID, ErrReservationConflict)
+			}
+			if total.ModelID != window.ModelID || total.Metric != window.Metric {
+				return nil, fmt.Errorf("active aggregate contradicts window %s dimension model=%s metric=%s: %w", window.ID, total.ModelID, total.Metric, ErrReservationConflict)
+			}
+			if matched {
+				return nil, fmt.Errorf("duplicate aggregate dimension for window %s: %w", window.ID, ErrReservationConflict)
+			}
+			if total.Count <= 0 || math.IsNaN(total.Amount) || math.IsInf(total.Amount, 0) || total.Amount <= 0 {
+				return nil, fmt.Errorf("invalid active aggregate for window %s amount=%v count=%d: %w", window.ID, total.Amount, total.Count, ErrReservationConflict)
+			}
+			claimed = total.Amount
+			matched = true
+		}
+
+		claim, err := buildWindowClaim(assignmentID, window, claimed, amount, now, policy)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
+func evaluateClaims(
+	assignmentID harnessmodel.ProviderAssignmentID,
+	windows []capacity.Window,
+	reservations []harnessmodel.ProviderReservation,
+	amount float64,
+	now time.Time,
+	policy Policy,
+) ([]WindowClaim, error) {
+	claims := make([]WindowClaim, 0, len(windows))
+	for _, window := range windows {
 		claimed := 0.0
 		for _, existing := range reservations {
 			if existing.WindowID != window.ID {
@@ -316,22 +404,55 @@ func evaluateClaims(assignmentID harnessmodel.ProviderAssignmentID, windows []ca
 				return nil, fmt.Errorf("claims for window %s overflow: %w", window.ID, ErrReservationConflict)
 			}
 		}
-		remaining := available - claimed
-		if remaining < 0 || amount > remaining {
-			return nil, fmt.Errorf("window %s effective=%.12g claimed=%.12g demand=%.12g: %w", window.ID, available, claimed, amount, ErrInsufficientCapacity)
-		}
-		expiresAt, err := claimExpiry(window, now, policy)
+
+		claim, err := buildWindowClaim(assignmentID, window, claimed, amount, now, policy)
 		if err != nil {
 			return nil, err
 		}
-		claims = append(claims, WindowClaim{
-			WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric,
-			EffectiveCapacity: available, AlreadyClaimed: claimed, Reserved: amount,
-			RemainingAfter: remaining - amount, ExpiresAt: expiresAt,
-			ReservationID: deterministicReservationID(reqIDContext{AssignmentID: assignmentID, WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric}),
-		})
+		claims = append(claims, claim)
 	}
 	return claims, nil
+}
+
+func buildWindowClaim(
+	assignmentID harnessmodel.ProviderAssignmentID,
+	window capacity.Window,
+	claimed float64,
+	amount float64,
+	now time.Time,
+	policy Policy,
+) (WindowClaim, error) {
+	available, ok := effectiveAvailable(window)
+	if !ok || math.IsNaN(available) || math.IsInf(available, 0) || available < 0 {
+		return WindowClaim{}, fmt.Errorf("window %s has invalid effective headroom: %w", window.ID, ErrCapacityUnavailable)
+	}
+	if math.IsNaN(claimed) || math.IsInf(claimed, 0) || claimed < 0 {
+		return WindowClaim{}, fmt.Errorf("window %s has invalid claimed amount: %w", window.ID, ErrReservationConflict)
+	}
+	remaining := available - claimed
+	if remaining < 0 || amount > remaining {
+		return WindowClaim{}, fmt.Errorf("window %s effective=%.12g claimed=%.12g demand=%.12g: %w", window.ID, available, claimed, amount, ErrInsufficientCapacity)
+	}
+	expiresAt, err := claimExpiry(window, now, policy)
+	if err != nil {
+		return WindowClaim{}, err
+	}
+	return WindowClaim{
+		WindowID:          window.ID,
+		ModelID:           window.ModelID,
+		Metric:            window.Metric,
+		EffectiveCapacity: available,
+		AlreadyClaimed:    claimed,
+		Reserved:          amount,
+		RemainingAfter:    remaining - amount,
+		ExpiresAt:         expiresAt,
+		ReservationID: deterministicReservationID(reqIDContext{
+			AssignmentID: assignmentID,
+			WindowID:     window.ID,
+			ModelID:      window.ModelID,
+			Metric:       window.Metric,
+		}),
+	}, nil
 }
 
 type reqIDContext struct {
@@ -397,15 +518,24 @@ func replayExisting(ctx context.Context, tx harnessstore.Reader, req Request, wi
 		if !ok || reservation.Amount != req.Demand.Reservation {
 			return fmt.Errorf("active assignment claim for window %s differs from replay demand: %w", window.ID, ErrReservationConflict)
 		}
-		expectedID := deterministicReservationID(reqIDContext{AssignmentID: req.AssignmentID, WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric})
+		expectedID := deterministicReservationID(reqIDContext{
+			AssignmentID: req.AssignmentID,
+			WindowID:     window.ID,
+			ModelID:      window.ModelID,
+			Metric:       window.Metric,
+		})
 		if reservation.ID != expectedID {
 			return fmt.Errorf("active assignment claim id for window %s is non-canonical: %w", window.ID, ErrReservationConflict)
 		}
 		available, _ := effectiveAvailable(window)
 		claims = append(claims, WindowClaim{
-			WindowID: window.ID, ModelID: window.ModelID, Metric: window.Metric,
-			EffectiveCapacity: available, Reserved: reservation.Amount,
-			ExpiresAt: reservation.ExpiresAt, ReservationID: reservation.ID,
+			WindowID:          window.ID,
+			ModelID:           window.ModelID,
+			Metric:            window.Metric,
+			EffectiveCapacity: available,
+			Reserved:          reservation.Amount,
+			ExpiresAt:         reservation.ExpiresAt,
+			ReservationID:     reservation.ID,
 		})
 		matched = append(matched, reservation)
 	}
