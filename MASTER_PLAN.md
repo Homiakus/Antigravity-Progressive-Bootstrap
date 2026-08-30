@@ -25,6 +25,7 @@ Current qualified milestones:
 - T-013 TaskEnvelope and plan digest binding is published through implementation commit `19e2c5d` (pre-flight `2c176c3`). Provider execution now receives a conversation-independent envelope bound to cryptographic plan digests.
 - T-014 automatic read-only provider routing is implemented through `e69c8e0` (pre-flight `ac7ecee`). Read-only tasks route automatically through selector and commit atomic assignments/reservations without workspace modification.
 - T-015 provider-aware failures and retries is implemented through `8d30f73` (pre-flight `1a17d88`). Provider errors are categorized into structured fault kinds, driving deterministic backoff, failover to alternative candidates, and transactional circuit breaker tripping.
+- T-016 safe provider handoff via existing `IN_DOUBT` is implemented through `4392d9d` (pre-flight `8940ead`). In-doubt side effects are checked and reconciled before replacement provider assignment, superseding prior assignments and releasing reservations atomically.
 
 ## 2. Architecture
 
@@ -261,8 +262,8 @@ T004,T006,T007 -> T008 DONE
 T004,T006,T007 -> T009 DONE
 T005,T009 -> T010 DONE -> T011 DONE
 T008,T011 -------------------------> T012 DONE
-T012 ---------------------------------> T013 DONE -> T014 DONE -> T015 DONE -> T016 READY/NEXT
-T013,T015 -> T016 -> T017 -> T018 -> T019
+T012 ---------------------------------> T013 DONE -> T014 DONE -> T015 DONE -> T016 DONE
+T013,T015 -> T016 -> T017 READY/NEXT -> T018 -> T019
 T012 -> T020
 T004,T005,T012,T020 -> T021
 T005..T019 -> T022
@@ -270,15 +271,15 @@ T011..T019 -> T023
 T014..T023 -> T024 -> T025 -> T026
 
 T027 DONE -> T028 DONE -> T029 DONE
-                    |-> T030 TODO
+                    |-> T030 READY
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-015 publication:
+Priority after T-016 publication:
 
-1. **T-016 P0 / NEXT** — safe provider handoff via existing `IN_DOUBT`.
-2. **T-030 P1** — structural plan/process audit and enforcement of durable task-start ordering.
-3. **T-017 P1 / BLOCKED ON T-016** — enable isolated write routing.
+1. **T-030 P0 / READY** — structural plan/process audit and enforcement of durable task-start ordering.
+2. **T-017 P1 / READY** — enable isolated write routing.
+3. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
 
 ## 7. Atomic Tasks
 
@@ -378,10 +379,10 @@ All applicable compatible native-metric quota windows are checked against comple
 **Tests & Benchmarks:** matrix tests for all fault categories and decision outcomes; SQLite circuit breaker CAS tests; 64-way concurrent fault/circuit sentinel; mutation tests killing defect mutants. CI benchmark `BenchmarkFaultClassifyAndDecide1000Operations` added to pipeline.
 
 ### T-016 — Safe provider handoff via existing `IN_DOUBT`
-**Status:** IN_PROGRESS. **Priority:** P0. Dependencies: T-013,T-015. Pre-flight established in `.engineering/preflight/T-016.md`.
+**Status:** DONE. **Priority:** P0. Dependencies: T-013,T-015. Implementation `4392d9d` (pre-flight `8940ead`). In-doubt effects evaluated, reconciled, or rejected before replacement provider assignment; prior assignment superseded and prior reservation released in atomic CAS transaction; living plan drift verified; CI smoke benchmark `BenchmarkSafeProviderHandoff100Operations`.
 
 ### T-017 — Enable isolated write routing
-**Status:** TODO. **Priority:** P1. Dependencies: T-016.
+**Status:** READY. **Priority:** P1. Dependencies: T-016.
 
 ### T-018 — Add fenced Commit Coordinator
 **Status:** TODO. **Priority:** P0. Dependencies: T-017.
@@ -519,6 +520,7 @@ Engineering-process path:
 - T-013 `19e2c5d` (pre-flight `2c176c3`).
 - T-014 `e69c8e0` (pre-flight `ac7ecee`).
 - T-015 `8d30f73` (pre-flight `1a17d88`).
+- T-016 `4392d9d` (pre-flight `8940ead`).
 
 ## 13. Recent Iteration Log
 
@@ -586,26 +588,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/router/...`, `go vet ./...`, all 7 smoke benchmarks, and Windows test suite.  
 **Plan result:** T-015 completed; T-016 (safe provider handoff via `IN_DOUBT`) is now READY / NEXT.
 
+### Iteration 19 — T-016
+**Selected task:** T-016 (safe provider handoff via existing `IN_DOUBT`) because it is P0, unblocked by T-013 and T-015, and ensures fail-closed safety for uncertain in-flight side effects during provider handoffs.  
+**Characterization:** when a provider fails or trips its circuit, the attempt may have in-flight or in-doubt effects. Handing off to a replacement provider without reconciling non-idempotent side effects violates invariant I-007. Handoff must inspect effect intents, require reconciliation if uncertain, verify living plan consistency, and atomically release prior reservation, supersede prior assignment, and acquire replacement assignment/reservation.  
+**Changes:** new `internal/harness/provider/handoff` package with `HandoffManager`, `CheckEffectSafety`, `HandoffRequest`, `HandoffResult`, `ErrHandoffUnsafeInDoubt`; integration with `EffectReconciler`, SQLite atomic transactional store, and `selector.StoreSource`; added `BenchmarkSafeProviderHandoff100Operations` to CI pipeline.  
+**Tests:** unit tests for effect safety check matrix, reconciliation outcomes (Absent, Confirmed, Unknown), atomic transition verification, living plan drift rejection; 64-way concurrent handoff sentinel under `go test -race`; mutation tests killing defects.  
+**Mutation/test-of-tests:** sentinels kill mutants that bypass un-reconciled in-doubt effects, ignore 1-char plan drift, admit nonexistent prior assignments, or reuse excluded failed provider accounts.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkSafeProviderHandoff100Operations` measures ~1.3 ms/op for 100 safe provider handoffs with database commits (~13 µs/op). Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./internal/harness/provider/handoff/...`, `go test -race ./internal/harness/provider/handoff/...`, `go test -race ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/router/...`, `go vet ./...`, all 8 smoke benchmarks, and Windows test suite.  
+**Plan result:** T-016 completed; T-030 and T-017 are now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-015
+### Context Compression Checkpoint — after T-016
 
-`CURRENT HEAD:` T-015 pre-flight is `1a17d88`; implementation is `8d30f73`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, and provider-aware fault tolerance / circuit breaking are implemented, qualified and published.  
-`ARCHITECTURE:` `internal/harness/provider/fault` classifies provider errors into semantic fault kinds, computes deterministic retry/failover decisions, and manages `ProviderCircuitState` in SQLite; `internal/harness/provider/router` integrates fault classification and circuit updates into execution lifecycle.  
-`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing and R-005 no-blind-failover.  
-`COMPLETED THIS ITERATION:` T-015 implementation, qualification and living-plan reconciliation.  
+`CURRENT HEAD:` T-016 pre-flight is `8940ead`; implementation is `4392d9d`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, and safe provider handoff with IN_DOUBT effect reconciliation are implemented, qualified and published.  
+`ARCHITECTURE:` `internal/harness/provider/handoff` inspects attempt effect intents, checks blind-retry safety, invokes `EffectReconciler` for uncertain non-idempotent effects, verifies living-plan digests, and executes atomic CAS transitions (release prior reservation, supersede prior assignment, select replacement provider, create replacement active assignment and reservation) in SQLite; `internal/harness/provider/fault` and `internal/harness/provider/router` feed failover and handoff triggers.  
+`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-006, I-007, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing, I-024 reservation CAS fencing, and R-005 no-blind-failover.  
+`COMPLETED THIS ITERATION:` T-016 implementation, qualification and living-plan reconciliation.  
 `RESOLVED FINDINGS:` none new; F-002 and F-013 solidified.  
 `OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; residual F-002 write routing waits for T-017.  
-`BLOCKERS:` none for T-016.  
-`NEXT TASK:` T-016 — Safe provider handoff via existing `IN_DOUBT`.  
-`WHY NEXT:` T-016 is P0, unblocked by T-013 and T-015, and bridges provider failovers with existing effect reconciliation and `IN_DOUBT` state machines to prevent duplicate effects during handoff.  
-`CRITICAL FILES:` `internal/harness/provider/fault/classify.go`, `internal/harness/provider/fault/decide.go`, `internal/harness/provider/fault/circuit.go`, `internal/harness/provider/fault/fault_test.go`, `internal/harness/provider/fault/concurrency_test.go`, `internal/harness/provider/fault/mutation_test.go`, `internal/harness/provider/fault/benchmark_test.go`, `internal/harness/provider/router/router.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-015.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/router/...`; `go vet ./...`; `go test ./internal/harness/provider/fault -run '^$' -bench '^BenchmarkFaultClassifyAndDecide1000Operations$' -benchtime=1x -benchmem`; all 7 CI smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` 8 semantic fault kinds; parsing HTTP status codes and retry-after durations; rejection of blind failover on every failure (R-005); exponential backoff with jitter for transient/rate-limited errors; monotonic SQLite CAS circuit breaker state updates with probe cooldown deadlines; terminal failure for safety policy violations.  
-`REJECTED OPTIONS:` retrying safety policy violations, ignoring retry-after duration, unlimited retries on single provider, blind failover on all errors, non-transactional circuit updates.  
-`NEW PROCESS LEARNING:` integrating fault classification and circuit breaker updates directly into router execution lifecycle ensures full failure visibility and automated candidate filtering without manual intervention.
+`BLOCKERS:` none for T-030 or T-017.  
+`NEXT TASK:` T-030 — Structural plan/process audit and enforcement of durable task-start ordering (or T-017 — Enable isolated write routing).  
+`WHY NEXT:` T-030 hardens deterministic task startup order and plan conformance across CLI / control-plane; T-017 enables isolated write routing for non-destructive workspace writes.  
+`CRITICAL FILES:` `internal/harness/provider/handoff/handoff.go`, `internal/harness/provider/handoff/handoff_test.go`, `internal/harness/provider/handoff/concurrency_test.go`, `internal/harness/provider/handoff/mutation_test.go`, `internal/harness/provider/handoff/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-016.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/handoff/...`; `go test -race ./internal/harness/provider/handoff/...`; `go test -race ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/router/...`; `go vet ./...`; `go test ./internal/harness/provider/handoff -run '^$' -bench '^BenchmarkSafeProviderHandoff100Operations$' -benchtime=1x -benchmem`; all 8 CI smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` fail-closed rejection of handoffs with un-reconciled IN_DOUBT non-idempotent effects (I-007); atomic SQLite CAS transition releasing prior reservation before superseding prior assignment; living plan drift verification (ErrStalePlan); at most one ACTIVE assignment per attempt (I-023).  
+`REJECTED OPTIONS:` blind failover without inspecting in-flight effect intents, allowing handoff when reconciler returns unknown status for non-idempotent effects, deleting or rewriting prior assignment records, allowing multiple active assignments on single attempt.  
+`NEW PROCESS LEARNING:` ordering reservation release before assignment supersession strictly respects schema invariants and eliminates concurrent state conflicts during multi-entity lifecycle transitions.
