@@ -366,7 +366,7 @@ All applicable compatible native-metric quota windows are checked against comple
 **Tests & Benchmarks:** matrix tests for read-only validation, plan drift, unviable provider, full route & execute lifecycle, execution failure; 64-way concurrency sentinel; mutation tests killing mutants. CI benchmark `BenchmarkReadOnlyRouterDispatch100Operations` added to pipeline.  
 
 ### T-015 — Make failures/retries provider-aware
-**Status:** TODO. **Priority:** P1. Dependencies: T-014.
+**Status:** IN_PROGRESS. **Priority:** P1. Dependencies: T-014. Pre-flight established in `.engineering/preflight/T-015.md`.
 
 ### T-016 — Safe provider handoff via existing `IN_DOUBT`
 **Status:** TODO. **Priority:** P0. Dependencies: T-013,T-015.
