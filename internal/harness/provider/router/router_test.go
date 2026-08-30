@@ -152,6 +152,8 @@ func TestRouterReadOnlyEnforcement(t *testing.T) {
 	// Workspace.ReadOnly = false must be rejected
 	writeEnv := makeReadOnlyEnvelope(planDigest)
 	writeEnv.Workspace.ReadOnly = false
+	writeEnv.Workspace.Isolated = true
+	writeEnv.Workspace.IsolationRoot = "c:/repo/.scratch/t014"
 
 	_, err := router.Route(ctx, writeEnv, planText)
 	if err == nil {
@@ -352,6 +354,233 @@ func TestRouterExecutionFailure(t *testing.T) {
 	}
 	if result.RetryAction == "" {
 		t.Fatal("result.RetryAction is empty")
+	}
+
+	// Verify assignment transitioned to RELEASED and reservation RELEASED
+	if err := db.View(ctx, func(r harnessstore.Reader) error {
+		asn, err := r.GetProviderAssignment(ctx, route.Assignment.ID)
+		if err != nil {
+			return err
+		}
+		if asn.State != harnessmodel.ProviderAssignmentReleased {
+			t.Errorf("assignment state = %s, want RELEASED", asn.State)
+		}
+
+		res, err := r.GetProviderReservation(ctx, route.Reservation.ID)
+		if err != nil {
+			return err
+		}
+		if res.State != harnessmodel.ProviderReservationReleased {
+			t.Errorf("reservation state = %s, want RELEASED", res.State)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func makeIsolatedWriteEnvelope(planDigest string) harnessmodel.TaskEnvelope {
+	return harnessmodel.TaskEnvelope{
+		ID:           "tenv_write_001",
+		TaskID:       "T-017",
+		PlanDigest:   planDigest,
+		TaskClass:    harnessmodel.TaskClassCodegen,
+		Title:        "Isolated code edit",
+		Objective:    "Implement isolated write router",
+		Instructions: "Write new implementation in isolated sandbox workspace",
+		Workspace: harnessmodel.WorkspaceSpec{
+			RootPath:      "c:/repo",
+			RepoID:        "repo1",
+			ReadOnly:      false,
+			Isolated:      true,
+			IsolationRoot: "c:/repo/.scratch/t017",
+		},
+		Role:                 "worker",
+		RequiredCapabilities: []string{"tools", "file_edit"},
+		MaxTokens:            6000,
+		CreatedAt:            time.Now().UTC(),
+	}
+}
+
+func TestRouterIsolatedWriteEnforcement(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	planText := []byte("# MASTER PLAN\n\nTask details...")
+	planDigest := harnessmodel.ComputePlanDigest(planText)
+
+	router := NewRouter(db, Options{})
+
+	// 1. Non-isolated write envelope must be rejected during envelope validation or routing
+	unisolatedEnv := makeIsolatedWriteEnvelope(planDigest)
+	unisolatedEnv.Workspace.Isolated = false
+	unisolatedEnv.Workspace.IsolationRoot = ""
+
+	_, err := router.RouteIsolatedWrite(ctx, unisolatedEnv, planText)
+	if err == nil {
+		t.Fatal("expected error for unisolated write envelope, got nil")
+	}
+
+	// 2. ReadOnly envelope passed to RouteIsolatedWrite must be rejected
+	roEnv := makeReadOnlyEnvelope(planDigest)
+	_, err = router.RouteIsolatedWrite(ctx, roEnv, planText)
+	if err == nil {
+		t.Fatal("expected ErrIsolatedWriteRequired for ReadOnly envelope in RouteIsolatedWrite, got nil")
+	}
+	if !errors.Is(err, ErrIsolatedWriteRequired) {
+		t.Fatalf("expected ErrIsolatedWriteRequired, got %v", err)
+	}
+
+	// 3. Plan drift in isolated write must be rejected
+	tamperedPlan := []byte("# MASTER PLAN\n\nTampered plan content!")
+	validEnv := makeIsolatedWriteEnvelope(planDigest)
+	_, err = router.RouteIsolatedWrite(ctx, validEnv, tamperedPlan)
+	if err == nil {
+		t.Fatal("expected ErrStalePlan for drifted plan in RouteIsolatedWrite, got nil")
+	}
+	if !errors.Is(err, harnessmodel.ErrStalePlan) {
+		t.Fatalf("expected ErrStalePlan, got %v", err)
+	}
+}
+
+func TestRouterIsolatedWriteSuccessfulRouteAndExecute(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	now := time.Unix(3000, 0).UTC()
+	seedTestAccounts(t, db, now)
+
+	planText := []byte("# MASTER PLAN\n\nTask details...")
+	planDigest := harnessmodel.ComputePlanDigest(planText)
+
+	router := NewRouter(db, Options{
+		Now: func() time.Time { return now },
+	})
+
+	env := makeIsolatedWriteEnvelope(planDigest)
+
+	route, err := router.RouteIsolatedWrite(ctx, env, planText)
+	if err != nil {
+		t.Fatalf("RouteIsolatedWrite failed: %v", err)
+	}
+
+	if route.Assignment.ID == "" {
+		t.Fatal("route.Assignment.ID is empty")
+	}
+	if route.Assignment.PlanDigest != planDigest {
+		t.Fatalf("route.Assignment.PlanDigest = %q, want %q", route.Assignment.PlanDigest, planDigest)
+	}
+	if route.Assignment.State != harnessmodel.ProviderAssignmentActive {
+		t.Fatalf("route.Assignment.State = %s, want ACTIVE", route.Assignment.State)
+	}
+	if route.Reservation == nil {
+		t.Fatal("expected non-nil reservation")
+	}
+	if route.Reservation.State != harnessmodel.ProviderReservationActive {
+		t.Fatalf("route.Reservation.State = %s, want ACTIVE", route.Reservation.State)
+	}
+
+	// Execute isolated write callback
+	execCalled := false
+	execFn := func(ctx context.Context, e harnessmodel.TaskEnvelope, a harnessmodel.ProviderAssignment) (IsolatedWriteOutput, error) {
+		execCalled = true
+		if e.Workspace.ReadOnly || !e.Workspace.Isolated {
+			t.Error("write executor received unisolated workspace")
+		}
+		if e.Workspace.IsolationRoot != "c:/repo/.scratch/t017" {
+			t.Errorf("unexpected isolation root: %s", e.Workspace.IsolationRoot)
+		}
+		return IsolatedWriteOutput{
+			ModifiedFiles: []string{"internal/harness/router.go"},
+			DiffSummary:   "+150 -10",
+			Output:        "isolated write successful",
+			TokensUsed:    2400,
+		}, nil
+	}
+
+	result, err := router.ExecuteIsolatedWrite(ctx, route, execFn)
+	if err != nil {
+		t.Fatalf("ExecuteIsolatedWrite failed: %v", err)
+	}
+	if !execCalled {
+		t.Fatal("write executor was not called")
+	}
+	if !result.Success {
+		t.Fatalf("result.Success = false, error: %s", result.Error)
+	}
+	if result.TokensUsed != 2400 {
+		t.Fatalf("result.TokensUsed = %d, want 2400", result.TokensUsed)
+	}
+
+	// Verify persistence in SQLite
+	if err := db.View(ctx, func(r harnessstore.Reader) error {
+		asn, err := r.GetProviderAssignment(ctx, route.Assignment.ID)
+		if err != nil {
+			return err
+		}
+		if asn.State != harnessmodel.ProviderAssignmentCompleted {
+			t.Errorf("assignment state = %s, want COMPLETED", asn.State)
+		}
+
+		res, err := r.GetProviderReservation(ctx, route.Reservation.ID)
+		if err != nil {
+			return err
+		}
+		if res.State != harnessmodel.ProviderReservationReleased {
+			t.Errorf("reservation state = %s, want RELEASED", res.State)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-executing completed route must fail
+	_, err = router.ExecuteIsolatedWrite(ctx, route, execFn)
+	if err == nil {
+		t.Fatal("expected error re-executing settled write route, got nil")
+	}
+}
+
+func TestRouterIsolatedWriteExecutionFailure(t *testing.T) {
+	ctx := context.Background()
+	db, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	now := time.Unix(3000, 0).UTC()
+	seedTestAccounts(t, db, now)
+
+	planText := []byte("# MASTER PLAN\n\nTask details...")
+	planDigest := harnessmodel.ComputePlanDigest(planText)
+
+	router := NewRouter(db, Options{
+		Now: func() time.Time { return now },
+	})
+
+	env := makeIsolatedWriteEnvelope(planDigest)
+
+	route, err := router.RouteIsolatedWrite(ctx, env, planText)
+	if err != nil {
+		t.Fatalf("RouteIsolatedWrite failed: %v", err)
+	}
+
+	failFn := func(ctx context.Context, e harnessmodel.TaskEnvelope, a harnessmodel.ProviderAssignment) (IsolatedWriteOutput, error) {
+		return IsolatedWriteOutput{}, errors.New("timeout connecting to provider backend")
+	}
+
+	result, err := router.ExecuteIsolatedWrite(ctx, route, failFn)
+	if err == nil {
+		t.Fatal("expected error from ExecuteIsolatedWrite, got nil")
+	}
+	if !errors.Is(err, ErrExecutionFailed) {
+		t.Fatalf("expected ErrExecutionFailed, got %v", err)
+	}
+	if result.Success {
+		t.Fatal("result.Success should be false")
+	}
+	if result.Fault == nil || result.Fault.Kind != "TRANSIENT_NETWORK" {
+		t.Fatalf("unexpected result.Fault: %+v", result.Fault)
 	}
 
 	// Verify assignment transitioned to RELEASED and reservation RELEASED

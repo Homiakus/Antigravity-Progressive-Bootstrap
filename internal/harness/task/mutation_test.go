@@ -36,7 +36,9 @@ func TestMutationsKillDefects(t *testing.T) {
 
 	t.Run("mutant: read-only workspace alteration ignored in digest", func(t *testing.T) {
 		env := base
-		env.Workspace.ReadOnly = true // changed from false
+		env.Workspace.ReadOnly = false // changed from true
+		env.Workspace.Isolated = true
+		env.Workspace.IsolationRoot = "c:/repo/.scratch"
 		d, err := env.Digest()
 		if err != nil {
 			t.Fatal(err)

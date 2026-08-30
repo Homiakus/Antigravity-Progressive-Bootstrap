@@ -22,6 +22,7 @@ func baseEnvelope() harnessmodel.TaskEnvelope {
 		Workspace: harnessmodel.WorkspaceSpec{
 			RootPath: "c:/repo",
 			RepoID:   "repo1",
+			ReadOnly: true,
 		},
 		Role:                 "worker",
 		RequiredCapabilities: []string{"tools", "file_edit"},
@@ -156,6 +157,7 @@ func TestFromNodeRun(t *testing.T) {
 	workspace := harnessmodel.WorkspaceSpec{
 		RootPath: "c:/workspace",
 		RepoID:   "repo_main",
+		ReadOnly: true,
 	}
 
 	env, err := FromNodeRun("tenv_nr_001", spec, run, attempt, samplePlanDigest, workspace, "Run full audit")

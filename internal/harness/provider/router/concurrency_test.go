@@ -10,54 +10,71 @@ import (
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
 )
 
-func TestConcurrentReadOnlyRouting(t *testing.T) {
+func TestRouterIsolatedWriteConcurrency64Workers(t *testing.T) {
 	ctx := context.Background()
 	db, cleanup := setupTestStore(t)
 	defer cleanup()
 
-	now := time.Unix(2000, 0).UTC()
+	now := time.Unix(4000, 0).UTC()
 	seedTestAccounts(t, db, now)
 
-	planText := []byte("# MASTER PLAN\n\nConcurrent tasks...")
+	planText := []byte("# MASTER PLAN\n\nTask details...")
 	planDigest := harnessmodel.ComputePlanDigest(planText)
 
 	router := NewRouter(db, Options{
 		Now: func() time.Time { return now },
 	})
 
-	const concurrentWorkers = 64
+	const workers = 64
 	var wg sync.WaitGroup
-	wg.Add(concurrentWorkers)
+	wg.Add(workers)
 
-	for i := 0; i < concurrentWorkers; i++ {
+	for i := 0; i < workers; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			env := makeReadOnlyEnvelope(planDigest)
-			env.ID = harnessmodel.TaskEnvelopeID(fmt.Sprintf("tenv_conc_%04d", idx))
-			env.AttemptID = harnessmodel.AttemptID(fmt.Sprintf("att_conc_%04d", idx))
-			env.Title = fmt.Sprintf("Audit task %d", idx)
 
-			route, err := router.Route(ctx, env, planText)
+			env := harnessmodel.TaskEnvelope{
+				ID:           harnessmodel.TaskEnvelopeID(fmt.Sprintf("tenv_conc_write_%d", idx)),
+				TaskID:       fmt.Sprintf("T-%03d", 100+idx),
+				AttemptID:    harnessmodel.AttemptID(fmt.Sprintf("att_conc_write_%d", idx)),
+				PlanDigest:   planDigest,
+				TaskClass:    harnessmodel.TaskClassCodegen,
+				Title:        fmt.Sprintf("Concurrent task %d", idx),
+				Objective:    "Perform isolated concurrent edit",
+				Instructions: "Safely execute isolated write in parallel",
+				Workspace: harnessmodel.WorkspaceSpec{
+					RootPath:      "c:/repo",
+					RepoID:        "repo1",
+					ReadOnly:      false,
+					Isolated:      true,
+					IsolationRoot: fmt.Sprintf("c:/repo/.scratch/worker_%d", idx),
+				},
+				Role:                 "worker",
+				RequiredCapabilities: []string{"tools", "file_edit"},
+				MaxTokens:            1000,
+				CreatedAt:            now,
+			}
+
+			route, err := router.RouteIsolatedWrite(ctx, env, planText)
 			if err != nil {
-				t.Errorf("worker %d Route failed: %v", idx, err)
+				t.Errorf("worker %d: RouteIsolatedWrite failed: %v", idx, err)
 				return
 			}
 
-			if route.Assignment.ID == "" || route.Assignment.State != harnessmodel.ProviderAssignmentActive {
-				t.Errorf("worker %d invalid assignment: %+v", idx, route.Assignment)
-				return
-			}
-
-			// Execute read-only task
-			res, err := router.Execute(ctx, route, func(ctx context.Context, e harnessmodel.TaskEnvelope, a harnessmodel.ProviderAssignment) (string, int64, error) {
-				return fmt.Sprintf("Result %d", idx), 100, nil
+			result, err := router.ExecuteIsolatedWrite(ctx, route, func(ctx context.Context, e harnessmodel.TaskEnvelope, a harnessmodel.ProviderAssignment) (IsolatedWriteOutput, error) {
+				return IsolatedWriteOutput{
+					ModifiedFiles: []string{fmt.Sprintf("worker_%d.go", idx)},
+					DiffSummary:   "+10 -1",
+					Output:        "completed",
+					TokensUsed:    500,
+				}, nil
 			})
 			if err != nil {
-				t.Errorf("worker %d Execute failed: %v", idx, err)
+				t.Errorf("worker %d: ExecuteIsolatedWrite failed: %v", idx, err)
 				return
 			}
-			if !res.Success {
-				t.Errorf("worker %d Execute not successful", idx)
+			if !result.Success {
+				t.Errorf("worker %d: result not success: %s", idx, result.Error)
 			}
 		}(i)
 	}

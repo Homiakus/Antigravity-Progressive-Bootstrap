@@ -63,16 +63,25 @@ func (r ContextRef) Validate() error {
 }
 
 type WorkspaceSpec struct {
-	RootPath   string `json:"rootPath"`
-	RepoID     string `json:"repoId,omitempty"`
-	BaseCommit string `json:"baseCommit,omitempty"`
-	WorktreeID string `json:"worktreeId,omitempty"`
-	ReadOnly   bool   `json:"readOnly,omitempty"`
+	RootPath      string `json:"rootPath"`
+	RepoID        string `json:"repoId,omitempty"`
+	BaseCommit    string `json:"baseCommit,omitempty"`
+	WorktreeID    string `json:"worktreeId,omitempty"`
+	ReadOnly      bool   `json:"readOnly,omitempty"`
+	Isolated      bool   `json:"isolated,omitempty"`
+	IsolationRoot string `json:"isolationRoot,omitempty"`
+	WriteLeaseID  string `json:"writeLeaseId,omitempty"`
 }
 
 func (w WorkspaceSpec) Validate() error {
 	if strings.TrimSpace(w.RootPath) == "" {
 		return fmt.Errorf("workspace root path is required")
+	}
+	if !w.ReadOnly && !w.Isolated {
+		return fmt.Errorf("un-isolated write workspace is forbidden: write workspaces must specify isolated=true")
+	}
+	if !w.ReadOnly && w.Isolated && strings.TrimSpace(w.IsolationRoot) == "" && strings.TrimSpace(w.WorktreeID) == "" {
+		return fmt.Errorf("isolated write workspace requires isolation root path or worktree id")
 	}
 	return nil
 }
@@ -85,6 +94,9 @@ func (w WorkspaceSpec) Fingerprint() string {
 	}
 	if w.WorktreeID != "" {
 		parts = append(parts, w.WorktreeID)
+	}
+	if w.IsolationRoot != "" {
+		parts = append(parts, w.IsolationRoot)
 	}
 	return strings.Join(parts, ":")
 }

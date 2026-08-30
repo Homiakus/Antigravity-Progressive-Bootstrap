@@ -28,6 +28,7 @@ func TestConcurrentEnvelopeDigests(t *testing.T) {
 				Workspace: harnessmodel.WorkspaceSpec{
 					RootPath: fmt.Sprintf("c:/repo/%d", idx%4),
 					RepoID:   "repo_concurrent",
+					ReadOnly: true,
 				},
 				Role:                 "worker",
 				RequiredCapabilities: []string{"tools", "file_edit"},
