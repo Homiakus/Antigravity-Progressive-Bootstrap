@@ -341,7 +341,7 @@ All applicable compatible native-metric quota windows are checked against comple
 **Verification/publication:** technical tree passed module-tidy, `go test ./...`, `go test -race ./...`, `go vet ./...`, all smoke benchmarks and Windows full tests.  
 
 ### T-013 — Introduce TaskEnvelope and plan digest
-**Status:** READY / NEXT. **Priority:** P0. Dependencies: T-012.
+**Status:** IN_PROGRESS. **Priority:** P0. Dependencies: T-012. Pre-flight established in `.engineering/preflight/T-013.md`.
 
 ### T-014 — Enable automatic read-only provider routing
 **Status:** TODO. **Priority:** P1. Dependencies: T-011..T-013.
