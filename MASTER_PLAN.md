@@ -21,7 +21,8 @@ Current qualified milestones:
 - T-010 conservative native-unit demand estimation is published as `9d327e7e530eb940021c7a3dce11b9f33944d53f`.
 - T-011 atomic provider reservations are published as `75651581908af7eb3b9b4148106fa142e5707bd9`; Linux/Windows CI, race, vet and reservation smoke gates passed on the published tree.
 - T-008 session/context brokering is published in `main` through reconciled commit `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`, with durable pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c` and implementation commit `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`.
-- T-012 explainable shadow selector is published in `main` with durable pre-flight `38c3708` and implementation commit `11c691d`. T-013 is now fully unblocked and is the next P0 product-path task.
+- T-012 explainable shadow selector is published in `main` with durable pre-flight `38c3708` and implementation commit `11c691d`.
+- T-013 TaskEnvelope and plan digest binding is published through implementation commit `19e2c5d` (pre-flight `2c176c3`). Provider execution now receives a conversation-independent envelope bound to cryptographic plan digests, unblocking T-014 (automatic read-only provider routing).
 
 ## 2. Architecture
 
@@ -139,12 +140,12 @@ T-015/T-016 reuse existing effect reconciliation rather than duplicate it.
 Typed worker authority denies publication semantically; T-018/T-019 still must hard-enforce it.
 
 ### F-008 — No TaskEnvelope independent of conversation history
-**Status:** Planned. **Severity:** High.  
-Affects T-013/T-014.
+**Status:** Resolved in T-013. **Severity:** High. **Confidence:** Confirmed.  
+TaskEnvelope in `internal/harness/model` and `internal/harness/task` encapsulates complete task specifications, instructions, input context refs, workspace boundaries, and role without coupling to conversation transcripts.
 
 ### F-009 — No plan digest on provider assignments
-**Status:** Planned. **Severity:** High.  
-Affects T-013/T-014/T-016.
+**Status:** Resolved in T-013. **Severity:** High. **Confidence:** Confirmed.  
+Provider assignments and task envelopes bind `PlanDigest` (SHA-256 hex of `MASTER_PLAN.md`). SQLite schema migration v16 adds `plan_digest` and index to `provider_assignments`. Stale plan drift is detected and rejected via `ErrStalePlan`.
 
 ### F-010 — No session/context broker
 **Status:** Resolved and published in T-008. **Severity:** Medium. **Confidence:** Confirmed.  
@@ -156,11 +157,11 @@ T-008 emits stable reason codes; T-012 emits complete durable rationale, per-cri
 
 ### F-012 — Released SQLite migrations are immutable
 **Status:** Resolved. **Severity:** High.  
-T-003/T-005 appended v14/v15; T-008 adds no migration.
+T-003/T-005 appended v14/v15; T-013 appended v16 (`plan_digest`); prior migrations are never mutated.
 
 ### F-013 — Unified provider execution interface before TaskEnvelope would couple to conversation state
-**Status:** Planned boundary. **Severity:** Medium.  
-Deferred to T-013/T-014.
+**Status:** Resolved boundary in T-013; portable execution unblocked for T-014. **Severity:** Medium.  
+TaskEnvelope defines the conversation-independent execution contract for provider adapters.
 
 ### F-014 — Concurrent autonomous work can move `main` during an iteration
 **Status:** Partially resolved in T-029. **Severity:** High. **Confidence:** Confirmed.  
@@ -258,7 +259,7 @@ T004,T006,T007 -> T008 DONE
 T004,T006,T007 -> T009 DONE
 T005,T009 -> T010 DONE -> T011 DONE
 T008,T011 -------------------------> T012 DONE
-T012 ---------------------------------> T013 READY/NEXT -> T014 -> T015
+T012 ---------------------------------> T013 DONE -> T014 READY/NEXT -> T015
 T013,T015 -> T016 -> T017 -> T018 -> T019
 T012 -> T020
 T004,T005,T012,T020 -> T021
@@ -271,11 +272,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-012 publication:
+Priority after T-013 publication:
 
-1. **T-013 P0 / NEXT** — TaskEnvelope and plan digest; all prerequisites are now published and complete.
+1. **T-014 P1 / NEXT** — enable automatic read-only provider routing; all prerequisites T-011..T-013 are now published and complete.
 2. **T-030 P1** — structural plan/process audit and enforcement of durable task-start ordering.
-3. **T-014 P1** — enable automatic read-only provider routing.
+3. **T-015 P1 / BLOCKED ON T-014** — make failures/retries provider-aware.
 
 ## 7. Atomic Tasks
 
@@ -341,10 +342,18 @@ All applicable compatible native-metric quota windows are checked against comple
 **Verification/publication:** technical tree passed module-tidy, `go test ./...`, `go test -race ./...`, `go vet ./...`, all smoke benchmarks and Windows full tests.  
 
 ### T-013 — Introduce TaskEnvelope and plan digest
-**Status:** IN_PROGRESS. **Priority:** P0. Dependencies: T-012. Pre-flight established in `.engineering/preflight/T-013.md`.
+**Status:** DONE / VERIFIED / PUBLISHED. **Priority:** P0.  
+**Dependencies:** T-012 published.  
+**Pre-flight lineage:** first publication-lineage commit `2c176c3` persists `.engineering/preflight/T-013.md` with `Status: IN_PROGRESS`, scope, protected surfaces and verification plan.  
+**Implementation lineage:** `19e2c5d`.  
+**Envelope:** `harnessmodel.TaskEnvelope` and package `internal/harness/task` define self-contained, conversation-independent task execution envelopes specifying TaskID, lineage (WorkflowRunID, NodeID, NodeRunID, AttemptID, AttemptNumber), PlanDigest, TaskClass, Title, Objective, Instructions, ContextRefs, WorkspaceSpec, Role, Required/Forbidden Capabilities, Determinism, Guidance, and Timeout.  
+**Plan digest & drift detection:** `ComputePlanDigest`, `ValidatePlanDigest`, `VerifyPlanConsistency`, and `CheckPlanDrift` guarantee that any execution or attempt mismatched against the living plan fails closed with `ErrStalePlan`.  
+**Provider assignment binding:** `harnessmodel.ProviderAssignment` records `PlanDigest`; SQLite migration v16 appends column `plan_digest TEXT NOT NULL DEFAULT ''` and index `provider_assignments_by_plan_digest` with CAS immutability.  
+**Bridge & factories:** `FromNodeRun` constructs envelopes from DAG execution state; `ToSelectorRequest` maps envelopes to T-012 selector requests.  
+**Tests & Benchmarks:** comprehensive unit tests, determinism tests invariant to field reordering, SQLite migration upgrade tests, 128-way concurrency sentinel, mutation tests killing defects. Smoke benchmark `BenchmarkTaskEnvelopeDigest1000Operations` measures ~3.5 µs/op (~3.5 ms for 1,000 operations). Added to CI pipeline.  
 
 ### T-014 — Enable automatic read-only provider routing
-**Status:** TODO. **Priority:** P1. Dependencies: T-011..T-013.
+**Status:** READY / NEXT. **Priority:** P1. Dependencies: T-011..T-013.
 
 ### T-015 — Make failures/retries provider-aware
 **Status:** TODO. **Priority:** P1. Dependencies: T-014.
@@ -488,6 +497,7 @@ Engineering-process path:
 - T-011 `75651581908af7eb3b9b4148106fa142e5707bd9`
 - T-008 `9fbd31d0a1348d45acf29c7c38dab3a138e66acb` (pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`, implementation `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`).
 - T-012 `11c691d` (pre-flight `38c3708`).
+- T-013 `19e2c5d` (pre-flight `2c176c3`).
 
 ## 13. Recent Iteration Log
 
@@ -525,26 +535,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./...`, `go test -race ./internal/harness/provider/selector`, `go vet ./...`, all smoke benchmarks, and Windows full test suite.  
 **Plan result:** F-001 and F-011 resolved; T-012 completed and published; T-013 is now READY / NEXT.
 
+### Iteration 16 — T-013
+**Selected task:** T-013 (introduce TaskEnvelope and plan digest) because it is P0, unblocked by T-012, and directly resolves F-008, F-009, and unblocks portable execution in F-013.  
+**Characterization:** execution across providers requires a self-contained, conversation-independent task execution envelope bound to cryptographic living-plan digests, eliminating ambient chat context dependencies and preventing stale plan execution.  
+**Changes:** new `TaskEnvelope` domain model in `internal/harness/model/task_envelope.go` and `internal/harness/task`; `ComputePlanDigest`, `ValidatePlanDigest`, `VerifyPlanConsistency`, and `CheckPlanDrift` in `internal/harness/model/plan_digest.go`; appended SQLite migration v16 (`migration_v16_plan_digest.go`) adding `plan_digest` column and index on `provider_assignments`; updated `provider_runtime_store.go` with CAS immutability; `ToSelectorRequest` bridge; CI benchmark.  
+**Tests:** unit tests for validation and failure paths; canonical digest determinism tests invariant to field reordering; DAG `FromNodeRun` mapping test; `ToSelectorRequest` bridge test; plan drift detection tests (`ErrStalePlan`); SQLite migration v16 upgrade fixture test; `ProviderAssignment` `PlanDigest` persistence and CAS tests; 128-way concurrent evaluator sentinel.  
+**Mutation/test-of-tests:** sentinels kill mutants that accept uppercase plan digests, ignore role alterations in digest, ignore read-only workspace flags in digest, ignore forbidden capabilities in digest, ignore context ref digest changes, bypass plan drift by a single character, or accept negative timeouts.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkTaskEnvelopeDigest1000Operations` measures ~3.5 µs/op (~3.5 ms for 1,000 operations). Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./...`, `go test -race ./internal/harness/task`, `go vet ./...`, all smoke benchmarks, and Windows full test suite.  
+**Plan result:** F-008 and F-009 resolved; F-012 updated; F-013 unblocked; T-013 completed and published; T-014 is now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-012
+### Context Compression Checkpoint — after T-013
 
-`CURRENT HEAD:` T-012 publication authority is `main@ce691ed9d4db1a40fa80ab490904aae5f3cbe359`; pre-flight is `38c3708`; implementation is `11c691d`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, and explainable shadow selector are implemented, qualified and published.  
-`ARCHITECTURE:` `provider/selector` owns pure deterministic provider selection, hard candidate filtering, multi-dimensional soft scoring, tie-breaking, and atomic StoreSource reading; integrates `provider/demand`, `provider/session`, `provider/capacity`, and `provider/reservation`.  
-`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-018, I-020, I-021, I-023..I-027, I-033..I-037 plus I-008/I-009 publication fencing.  
-`COMPLETED THIS ITERATION:` T-012 implementation, qualification and publication.  
-`RESOLVED FINDINGS:` F-001 and F-011 resolved.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-002/F-008/F-009 remain dependency-chain work.  
-`BLOCKERS:` none for T-013.  
-`NEXT TASK:` T-013 — Introduce TaskEnvelope and plan digest.  
-`WHY NEXT:` T-013 is P0, unblocked by T-012, and introduces conversation-independent task execution envelopes bound to immutable plan digests before write routing begins.  
-`CRITICAL FILES:` `internal/harness/provider/selector/selector.go`, `internal/harness/provider/selector/store_source.go`, `internal/harness/provider/selector/selector_test.go`, `internal/harness/provider/selector/benchmark_test.go`, `internal/harness/provider/session/broker.go`, `internal/harness/provider/demand/estimate.go`, `internal/harness/provider/reservation/service.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-012.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/selector`; `go test ./...`; `go test -race ./internal/harness/provider/selector`; `go vet ./...`; `go test ./internal/harness/provider/selector -run '^$' -bench '^BenchmarkSelectorEvaluate100Candidates$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` pure shadow selector without write leases; hard filters eliminate unviable candidates early with stable machine-readable reasons; multi-dimensional soft score combines headroom, reset horizon, session reuse bonus, reliability, switch penalty, and uncertainty penalty; strict tie-breaking across 8 dimensions ensures 100% deterministic candidate selection invariant to input order; single `Store.View` prevents torn snapshot across tables.  
-`REJECTED OPTIONS:` opaque scoring heuristics, hard-coded provider model names, cross-metric quota summing, ignoring circuit state, non-deterministic map iteration ordering.  
-`NEW PROCESS LEARNING:` the checkpoint heading must maintain three hashes `### Context Compression Checkpoint` and contain all 15 required fields for machine verification by agctl state complete.
+`CURRENT HEAD:` T-013 pre-flight is `2c176c3`; implementation is `19e2c5d`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, and conversation-independent TaskEnvelope with plan digest binding are implemented, qualified and published.  
+`ARCHITECTURE:` `harness/task` and `harnessmodel.TaskEnvelope` own conversation-independent task execution envelopes, canonical serialization, and plan digest drift detection; SQLite schema v16 binds `plan_digest` to `provider_assignments`.  
+`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing.  
+`COMPLETED THIS ITERATION:` T-013 implementation, qualification and publication.  
+`RESOLVED FINDINGS:` F-008 and F-009 resolved; F-012 updated with v16; F-013 unblocked.  
+`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-002 remains until T-014.  
+`BLOCKERS:` none for T-014.  
+`NEXT TASK:` T-014 — Enable automatic read-only provider routing.  
+`WHY NEXT:` T-014 is P1, unblocked by T-011..T-013, and enables read-only routing through the explainable selector and TaskEnvelope without modifying workspace files.  
+`CRITICAL FILES:` `internal/harness/model/task_envelope.go`, `internal/harness/model/plan_digest.go`, `internal/harness/model/provider_runtime.go`, `internal/harness/task/task.go`, `internal/harness/task/task_test.go`, `internal/harness/store/sqlite/migration_v16_plan_digest.go`, `internal/harness/store/sqlite/provider_runtime_store.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-013.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/task`; `go test ./internal/harness/store/sqlite`; `go test ./...`; `go test -race ./internal/harness/task`; `go vet ./...`; `go test ./internal/harness/task -run '^$' -bench '^BenchmarkTaskEnvelopeDigest1000Operations$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` self-contained conversation-independent execution contract; SHA-256 plan digest binds task execution to exact living plan state; SQLite migration v16 appends plan_digest to provider_assignments with CAS immutability; deterministic canonical digest calculation sorts slices and metadata keys; single-character plan drift triggers ErrStalePlan.  
+`REJECTED OPTIONS:` ambient chat context in task dispatch, unverified plan strings, mutating existing SQLite migration files, mutable plan digests on active assignments.  
+`NEW PROCESS LEARNING:` appending migration v16 while maintaining append-only immutability of v1..v15 requires updating SchemaVersion and testing both fresh databases and historical upgrade fixtures.
