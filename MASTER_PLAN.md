@@ -29,6 +29,7 @@ Current qualified milestones:
 - T-030 structural plan audit and process metrics generator is implemented through `98640db` (pre-flight `8636969`). Living plan headings, statuses, DAG acyclicity, finding severities, pre-flight existence, and context compression checkpoints are machine-verified and quantified.
 - T-017 isolated write routing is implemented through `eb276e1` (pre-flight `f09ed03`). Tasks that generate code or edits route safely to providers in isolated scratch workspaces (`WorkspaceSpec.Isolated == true`) with verified plan digests, capability matching, and symmetric SQLite ledger settlement.
 - T-018 fenced Commit Coordinator is implemented through `491ee3c` (pre-flight `3beb45b`). Diff application from isolated scratch workspaces to the target working tree is strictly guarded by typed coordinator authority (`RoleCoordinator`), cryptographic living-plan verification, path traversal defenses, and deterministic tree SHA-256 digests.
+- T-019 single-writer main policy is implemented through `6235275` (pre-flight `ffdd97d`). Direct worker git pushes and force pushes are strictly prohibited (`ErrForcePushForbidden`, `ErrUnauthorizedRole`), working tree cleanliness and living plan consistency are machine-verified, and publication emits structured observed proofs.
 
 ## 2. Architecture
 
@@ -142,8 +143,8 @@ Provider routing stays orthogonal to workers/fenced attempt leases.
 T-015/T-016 reuse existing effect reconciliation rather than duplicate it.
 
 ### F-007 — Direct worker pushes are unsafe with parallel providers
-**Status:** IN_PROGRESS. **Severity:** Critical. **Confidence:** Strong.  
-Typed worker authority denies commit/publication semantically (T-028), and fenced Commit Coordinator (T-018) enforces that only coordinator authority can verify and apply worker candidate diffs to the working tree. T-019 adds repository push fencing.
+**Status:** RESOLVED in T-018 and T-019. **Severity:** Critical. **Confidence:** Strong.  
+Typed worker authority denies commit/publication semantically (T-028), fenced Commit Coordinator (T-018) validates candidate diffs, and Publisher (T-019) enforces single-writer main policy (`force=false`, coordinator-only, clean tree, matching living-plan digest).
 
 ### F-008 — No TaskEnvelope independent of conversation history
 **Status:** Resolved in T-013. **Severity:** High. **Confidence:** Confirmed.  
@@ -278,11 +279,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-018 publication:
+Priority after T-019 publication:
 
-1. **T-019 P0 / IN_PROGRESS** — enforce single-writer main policy.
-2. **T-020 P1 / READY** — add provider diagnostics and agctl route explain.
-3. **T-021 P2 / BLOCKED ON T-020** — add provider/quota dashboard.
+1. **T-020 P1 / NEXT** — add provider diagnostics and agctl route explain.
+2. **T-021 P2 / BLOCKED ON T-020** — add provider/quota dashboard.
+3. **T-022 P0 / READY** — multidimensional concurrency/property/chaos tests.
 
 ## 7. Atomic Tasks
 
@@ -393,10 +394,11 @@ All applicable compatible native-metric quota windows are checked against comple
 `CommitCoordinator` in `internal/harness/coordinator/coordinator.go` enforces typed `RoleCoordinator` authority (`AllowsCoordinatorAuthority`), rejects `RoleWorker` and untyped roles (`ErrUnauthorizedRole`), detects living-plan drift (`ErrPlanDrift`), blocks path traversal and leading-slash escapes (`ErrPathEscape`), safely copies verified files from `IsolationRoot` to `TargetRoot`, and computes deterministic tree SHA-256 digests. CI smoke benchmark `BenchmarkCommitCoordinatorApply100Operations` added to pipeline.
 
 ### T-019 — Enforce single-writer main policy
-**Status:** IN_PROGRESS. **Priority:** P0. Pre-flight recorded in `.engineering/preflight/T-019.md`. Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
+**Status:** DONE. **Priority:** P0. Implementation `6235275` (pre-flight `ffdd97d`). Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
+`Publisher` in `internal/harness/coordinator/publisher.go` enforces coordinator-only publication authority (`AllowsCoordinatorAuthority`), forbids force pushes (`ErrForcePushForbidden`), verifies living plan freshness (`task.CheckPlanDrift`), verifies clean working trees (`ErrDirtyWorkingTree`), and issues structured `PublicationResult` proofs. CI smoke benchmark `BenchmarkPublisherEvaluate100Operations` added to pipeline.
 
 ### T-020 — Add provider diagnostics and `agctl route explain`
-**Status:** TODO. **Priority:** P1. Dependencies: T-012.
+**Status:** READY. **Priority:** P1. Dependencies: T-012.
 
 ### T-021 — Add provider/quota dashboard
 **Status:** TODO. **Priority:** P2. Dependencies: T-004,T-005,T-012,T-020.
@@ -529,6 +531,7 @@ Engineering-process path:
 - T-030 `98640db` (pre-flight `8636969`).
 - T-017 `eb276e1` (pre-flight `f09ed03`).
 - T-018 `491ee3c` (pre-flight `3beb45b`).
+- T-019 `6235275` (pre-flight `ffdd97d`).
 
 ## 13. Recent Iteration Log
 
@@ -636,26 +639,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./internal/harness/coordinator/...`, `go test -race ./internal/harness/coordinator/...`, `go vet ./...`, all 11 smoke benchmarks, and Windows test suite.  
 **Plan result:** F-007 narrowed; T-018 completed; T-019 (enforce single-writer main policy) is now READY / NEXT.
 
+### Iteration 23 — T-019
+**Selected task:** T-019 (enforce single-writer main policy) because it is P0, unblocked by T-018, and enforces single-writer publication to origin/main with strict force=false requirement and clean working tree checks.  
+**Characterization:** direct worker pushes or unverified force-pushes violate invariant I-008 and risk branch mutation races. `Publisher` strictly validates `RoleCoordinator` authority, rejects `ForcePush=true` (`ErrForcePushForbidden`), verifies cryptographic `PlanDigest` consistency, verifies working tree cleanliness (`ErrDirtyWorkingTree`), and executes git push with observed publication proofs.  
+**Changes:** added `Publisher`, `PublicationRequest`, `PublicationResult`, `GitClient`, `ErrForcePushForbidden`, `ErrDirtyWorkingTree`, `ErrBranchMismatch`, `ErrRemoteMismatch` in `internal/harness/coordinator/publisher.go`; added `BenchmarkPublisherEvaluate100Operations` to CI pipeline.  
+**Tests:** unit tests for valid coordinator publication, worker rejection (`ErrUnauthorizedRole`), force push rejection (`ErrForcePushForbidden`), plan drift rejection (`ErrPlanDrift`), dirty tree rejection (`ErrDirtyWorkingTree`), remote/branch mismatch rejection; 64-way concurrent publication policy sentinel under `go test -race`; mutation tests killing defects.  
+**Mutation/test-of-tests:** sentinels kill mutants that permit worker roles to publish, permit force pushes, bypass 1-char living plan drift, or ignore dirty working trees.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkPublisherEvaluate100Operations` measures ~103 µs for 100 publication evaluations with plan drift validation and role authority checks (~1.03 µs/op). Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./internal/harness/coordinator/...`, `go test -race ./internal/harness/coordinator/...`, `go vet ./...`, all 12 smoke benchmarks, and Windows test suite.  
+**Plan result:** F-007 fully resolved; T-019 completed; T-020 (add provider diagnostics and `agctl route explain`) is now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-018
+### Context Compression Checkpoint — after T-019
 
-`CURRENT HEAD:` T-018 pre-flight is `3beb45b`; implementation is `491ee3c`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, safe provider handoff with IN_DOUBT effect reconciliation, automated living-plan structural auditing / process metrics, isolated write provider routing, and fenced Commit Coordinator are implemented, qualified and published.  
-`ARCHITECTURE:` `internal/harness/coordinator/coordinator.go` provides authoritative diff verification and application from worker `IsolationRoot` to target workspace, guarded strictly by `engineering.RoleCoordinator.AllowsCoordinatorAuthority()`, cryptographic living `PlanDigest` freshness, path traversal escape defenses, and deterministic SHA-256 tree digests.  
+`CURRENT HEAD:` T-019 pre-flight is `ffdd97d`; implementation is `6235275`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, safe provider handoff with IN_DOUBT effect reconciliation, automated living-plan structural auditing / process metrics, isolated write provider routing, fenced Commit Coordinator, and single-writer publication policy are implemented, qualified and published.  
+`ARCHITECTURE:` `internal/harness/coordinator/publisher.go` enforces single-writer publication to `origin/main` strictly under `RoleCoordinator` authority, prohibiting force pushes (`force=false` required), validating living plan consistency (`task.CheckPlanDrift`), and ensuring clean working trees before push execution.  
 `CRITICAL INVARIANTS:` I-001, I-002, I-005, I-006, I-007, I-008, I-009, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-037 plus R-005 no-blind-failover.  
-`COMPLETED THIS ITERATION:` T-018 implementation, qualification and living-plan reconciliation.  
-`RESOLVED FINDINGS:` F-007 narrowed by Commit Coordinator verification fencing.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-019.  
-`BLOCKERS:` none for T-019.  
-`NEXT TASK:` T-019 — Enforce single-writer main policy.  
-`WHY NEXT:` T-019 is P0, unblocked by T-018, and enforces single-writer main policy to guarantee that repository pushes to `origin/main` are only executed with `force=false` by the verified Commit Coordinator with machine-observed publication proofs.  
-`CRITICAL FILES:` `internal/harness/coordinator/coordinator.go`, `internal/harness/coordinator/coordinator_test.go`, `internal/harness/coordinator/concurrency_test.go`, `internal/harness/coordinator/mutation_test.go`, `internal/harness/coordinator/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-018.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/coordinator/...`; `go test -race ./internal/harness/coordinator/...`; `go vet ./...`; `go test ./internal/harness/coordinator -run '^$' -bench '^BenchmarkCommitCoordinatorApply100Operations$' -benchtime=1x -benchmem`; all 11 CI smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` strict fail-closed rejection of `RoleWorker` and untyped roles via `AllowsCoordinatorAuthority()`; strict living plan consistency check before diff application (`task.CheckPlanDrift`); relative path validation preventing directory traversal (`..`) or leading slashes.  
-`REJECTED OPTIONS:` permitting worker tasks to commit directly, bypassing plan drift check on commit, skipping path escape checks, allowing unverified file overwrites.  
-`NEW PROCESS LEARNING:` centralizing candidate diff application in a dedicated, role-fenced Commit Coordinator guarantees that isolated worker tasks can never accidentally or maliciously alter files outside their task scope.
+`COMPLETED THIS ITERATION:` T-019 implementation, qualification and living-plan reconciliation.  
+`RESOLVED FINDINGS:` F-007 fully resolved by single-writer publication policy.  
+`OPEN CRITICAL/HIGH FINDINGS:` residual F-014 (provider diagnostics) remains until T-020.  
+`BLOCKERS:` none for T-020.  
+`NEXT TASK:` T-020 — Add provider diagnostics and `agctl route explain`.  
+`WHY NEXT:` T-020 is P1, unblocked by T-012, and provides user-facing inspection and explanation of routing candidate scoring, headroom, circuit breakers, and elimination reasons via `agctl route explain`.  
+`CRITICAL FILES:` `internal/harness/coordinator/publisher.go`, `internal/harness/coordinator/publisher_test.go`, `internal/harness/coordinator/publisher_concurrency_test.go`, `internal/harness/coordinator/publisher_mutation_test.go`, `internal/harness/coordinator/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-019.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/coordinator/...`; `go test -race ./internal/harness/coordinator/...`; `go vet ./...`; `go test ./internal/harness/coordinator -run '^$' -bench '^BenchmarkPublisherEvaluate100Operations$' -benchtime=1x -benchmem`; all 12 CI smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` strict fail-closed rejection of `RoleWorker` on publication; strict rejection of `ForcePush=true`; machine check of working tree cleanliness before push; machine check of `PlanDigest` freshness against `MASTER_PLAN.md`.  
+`REJECTED OPTIONS:` allowing worker tasks to push to origin/main, allowing force pushes, skipping working tree cleanliness checks, publishing without living plan consistency verification.  
+`NEW PROCESS LEARNING:` hard-enforcing publication through a single-writer policy with machine-observed proof provides cryptographic and process guarantees that only authorized, verified, and uncorrupted code reaches `origin/main`.
