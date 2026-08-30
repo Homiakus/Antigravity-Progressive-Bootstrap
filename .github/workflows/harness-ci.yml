@@ -68,6 +68,9 @@ jobs:
       - name: Provider atomic reservation smoke benchmark
         run: go test ./internal/harness/store/sqlite -run '^$' -bench '^BenchmarkAtomicProviderReservation10KActiveClaims$' -benchtime=1x -benchmem
 
+      - name: Provider shadow selector smoke benchmark
+        run: go test ./internal/harness/provider/selector -run '^$' -bench '^BenchmarkSelectorEvaluate100Candidates$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 
