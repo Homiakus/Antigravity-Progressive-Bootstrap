@@ -67,3 +67,38 @@ func BenchmarkCommitCoordinatorApply100Operations(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkPublisherEvaluate100Operations(b *testing.B) {
+	ctx := context.Background()
+	git := &mockGitClient{
+		headSHA: "abc1234567890abcdef1234567890abcdef12345",
+		isClean: true,
+	}
+
+	planText := []byte("# MASTER PLAN\n\nBenchmark publisher...")
+	planDigest := harnessmodel.ComputePlanDigest(planText)
+
+	now := time.Unix(11000, 0).UTC()
+	pub := NewPublisher(git, func() time.Time { return now })
+
+	req := PublicationRequest{
+		Role:            engineering.RoleCoordinator,
+		RemoteName:      "origin",
+		BranchName:      "main",
+		PlanDigest:      planDigest,
+		ForcePush:       false,
+		ExpectedHeadSHA: "abc1234567890abcdef1234567890abcdef12345",
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 100; j++ {
+			res, err := pub.Publish(ctx, req, planText)
+			if err != nil || !res.Success {
+				b.Fatalf("Publish failed: %v", err)
+			}
+		}
+	}
+}
