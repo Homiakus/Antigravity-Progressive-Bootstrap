@@ -24,6 +24,7 @@ Current qualified milestones:
 - T-012 explainable shadow selector is published in `main` with durable pre-flight `38c3708` and implementation commit `11c691d`.
 - T-013 TaskEnvelope and plan digest binding is published through implementation commit `19e2c5d` (pre-flight `2c176c3`). Provider execution now receives a conversation-independent envelope bound to cryptographic plan digests.
 - T-014 automatic read-only provider routing is implemented through `e69c8e0` (pre-flight `ac7ecee`). Read-only tasks route automatically through selector and commit atomic assignments/reservations without workspace modification.
+- T-015 provider-aware failures and retries is implemented through `8d30f73` (pre-flight `1a17d88`). Provider errors are categorized into structured fault kinds, driving deterministic backoff, failover to alternative candidates, and transactional circuit breaker tripping.
 
 ## 2. Architecture
 
@@ -260,7 +261,7 @@ T004,T006,T007 -> T008 DONE
 T004,T006,T007 -> T009 DONE
 T005,T009 -> T010 DONE -> T011 DONE
 T008,T011 -------------------------> T012 DONE
-T012 ---------------------------------> T013 DONE -> T014 DONE -> T015 READY/NEXT
+T012 ---------------------------------> T013 DONE -> T014 DONE -> T015 DONE -> T016 READY/NEXT
 T013,T015 -> T016 -> T017 -> T018 -> T019
 T012 -> T020
 T004,T005,T012,T020 -> T021
@@ -273,11 +274,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-014 publication:
+Priority after T-015 publication:
 
-1. **T-015 P1 / NEXT** — make failures/retries provider-aware.
+1. **T-016 P0 / NEXT** — safe provider handoff via existing `IN_DOUBT`.
 2. **T-030 P1** — structural plan/process audit and enforcement of durable task-start ordering.
-3. **T-016 P0 / BLOCKED ON T-015** — safe provider handoff via existing `IN_DOUBT`.
+3. **T-017 P1 / BLOCKED ON T-016** — enable isolated write routing.
 
 ## 7. Atomic Tasks
 
@@ -366,7 +367,15 @@ All applicable compatible native-metric quota windows are checked against comple
 **Tests & Benchmarks:** matrix tests for read-only validation, plan drift, unviable provider, full route & execute lifecycle, execution failure; 64-way concurrency sentinel; mutation tests killing mutants. CI benchmark `BenchmarkReadOnlyRouterDispatch100Operations` added to pipeline.  
 
 ### T-015 — Make failures/retries provider-aware
-**Status:** IN_PROGRESS. **Priority:** P1. Dependencies: T-014. Pre-flight established in `.engineering/preflight/T-015.md`.
+**Status:** DONE / VERIFIED / PUBLISHED. **Priority:** P1.  
+**Dependencies:** T-014 published.  
+**Pre-flight lineage:** first publication-lineage commit `1a17d88` persists `.engineering/preflight/T-015.md` with `Status: IN_PROGRESS`, scope, protected surfaces and verification plan.  
+**Implementation lineage:** `8d30f73`.  
+**Classification:** `internal/harness/provider/fault` provides `Classify` categorizing errors into 8 semantic kinds (RateLimited, ContextLimitExceeded, Authentication, ModelUnavailable, ServerOverloaded, TransientNetwork, ContentFilter, Unknown), parsing HTTP status codes, retry-after durations, and mapping to standard `harnessmodel.Failure`.  
+**Decision Engine:** `Decide` computes `ActionRetrySame`, `ActionFailover`, `ActionTripCircuitAndFailover`, or `ActionTerminalFail` based on fault kind, attempt count, backoff policy with jitter, and circuit breaker state. Rejects blind failover per R-005.  
+**Circuit Breaker Management:** `CircuitManager` performs monotonic compare-and-swap (CAS) updates to `ProviderCircuitState` in SQLite store, resetting on success and tripping to OPEN with cooldown deadline upon reaching failure thresholds.  
+**Router Integration:** `Router.Execute` integrates fault classification and circuit breaker updates into execution lifecycle without leaking reservations or writing disk state.  
+**Tests & Benchmarks:** matrix tests for all fault categories and decision outcomes; SQLite circuit breaker CAS tests; 64-way concurrent fault/circuit sentinel; mutation tests killing defect mutants. CI benchmark `BenchmarkFaultClassifyAndDecide1000Operations` added to pipeline.
 
 ### T-016 — Safe provider handoff via existing `IN_DOUBT`
 **Status:** TODO. **Priority:** P0. Dependencies: T-013,T-015.
@@ -509,6 +518,7 @@ Engineering-process path:
 - T-012 `11c691d` (pre-flight `38c3708`).
 - T-013 `19e2c5d` (pre-flight `2c176c3`).
 - T-014 `e69c8e0` (pre-flight `ac7ecee`).
+- T-015 `8d30f73` (pre-flight `1a17d88`).
 
 ## 13. Recent Iteration Log
 
@@ -566,26 +576,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./internal/harness/provider/router/...`, `go test -race ./internal/harness/provider/router/...`, `go vet ./...`, all 6 smoke benchmarks, and Windows test suite.  
 **Plan result:** F-002 updated; F-013 resolved; T-014 completed; T-015 is now READY / NEXT.
 
+### Iteration 18 — T-015
+**Selected task:** T-015 (make failures/retries provider-aware) because it is P1, unblocked by T-014, and classifies provider failures to drive provider-aware retries, failovers, and circuit breaking.  
+**Characterization:** execution failures across providers previously lacked semantic differentiation. T-015 provides structured fault classification, deterministic retry decisions (RetrySame, Failover, TripCircuitAndFailover, TerminalFail), monotonic SQLite circuit breaker management, and router execution integration.  
+**Changes:** new `internal/harness/provider/fault` package with `Classify`, `Classification`, `Decide`, `Decision`, `Policy`, `CircuitManager`; integrated fault handling into `internal/harness/provider/router/router.go`; added `BenchmarkFaultClassifyAndDecide1000Operations` to CI pipeline.  
+**Tests:** unit tests for classification matrix, decision matrix, and SQLite circuit manager; 64-way concurrent fault reporting and circuit CAS sentinel; mutation tests killing defects; router failure integration test.  
+**Mutation/test-of-tests:** sentinels kill mutants that permit content filter retries, ignore retry-after backoff, allow infinite same-provider retries, or omit terminal failure on max attempts.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkFaultClassifyAndDecide1000Operations` measures ~10.0 ms/op for 1,000 classification and retry decisions (~10.0 µs/op). Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/router/...`, `go vet ./...`, all 7 smoke benchmarks, and Windows test suite.  
+**Plan result:** T-015 completed; T-016 (safe provider handoff via `IN_DOUBT`) is now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-014
+### Context Compression Checkpoint — after T-015
 
-`CURRENT HEAD:` T-014 pre-flight is `ac7ecee`; implementation is `e69c8e0`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, and automatic read-only provider routing are implemented, qualified and published.  
-`ARCHITECTURE:` `internal/harness/provider/router` orchestrates automatic read-only provider routing, living-plan consistency checks, explainable candidate selection, atomic assignment/reservation commits in SQLite, and safe read-only execution with CAS lifecycle settlement.  
-`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing.  
-`COMPLETED THIS ITERATION:` T-014 implementation, qualification and living-plan reconciliation.  
-`RESOLVED FINDINGS:` F-002 updated for read-only routing; F-013 resolved.  
+`CURRENT HEAD:` T-015 pre-flight is `1a17d88`; implementation is `8d30f73`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, and provider-aware fault tolerance / circuit breaking are implemented, qualified and published.  
+`ARCHITECTURE:` `internal/harness/provider/fault` classifies provider errors into semantic fault kinds, computes deterministic retry/failover decisions, and manages `ProviderCircuitState` in SQLite; `internal/harness/provider/router` integrates fault classification and circuit updates into execution lifecycle.  
+`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing and R-005 no-blind-failover.  
+`COMPLETED THIS ITERATION:` T-015 implementation, qualification and living-plan reconciliation.  
+`RESOLVED FINDINGS:` none new; F-002 and F-013 solidified.  
 `OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; residual F-002 write routing waits for T-017.  
-`BLOCKERS:` none for T-015.  
-`NEXT TASK:` T-015 — Make failures/retries provider-aware.  
-`WHY NEXT:` T-015 is P1, unblocked by T-014, and classifies provider failures (rate limits, context limits, transient network, model downtime) to drive provider-aware retries and circuit breaking.  
-`CRITICAL FILES:` `internal/harness/provider/router/router.go`, `internal/harness/provider/router/router_test.go`, `internal/harness/provider/router/concurrency_test.go`, `internal/harness/provider/router/mutation_test.go`, `internal/harness/provider/router/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-014.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/router/...`; `go test -race ./internal/harness/provider/router/...`; `go vet ./...`; `go test ./internal/harness/provider/router -run '^$' -bench '^BenchmarkReadOnlyRouterDispatch100Operations$' -benchtime=1x -benchmem`; all 6 CI smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` strict rejection of non-read-only workspaces (`ErrReadOnlyRequired`); living-plan drift detection before candidate selection (`ErrStalePlan`); atomic SQLite transaction creating assignment and reservation; CAS settlement releasing reservations before final assignment state; emission of immutable usage sample upon execution completion.  
-`REJECTED OPTIONS:` executing write operations in read-only router; bypassing plan drift validation; non-atomic assignment/reservation creation; ignoring executor failures during reservation release.  
-`NEW PROCESS LEARNING:` structuring router tests with dedicated concurrency and mutation files provides high-confidence verification and test-of-tests evidence without polluting unit test cases.
+`BLOCKERS:` none for T-016.  
+`NEXT TASK:` T-016 — Safe provider handoff via existing `IN_DOUBT`.  
+`WHY NEXT:` T-016 is P0, unblocked by T-013 and T-015, and bridges provider failovers with existing effect reconciliation and `IN_DOUBT` state machines to prevent duplicate effects during handoff.  
+`CRITICAL FILES:` `internal/harness/provider/fault/classify.go`, `internal/harness/provider/fault/decide.go`, `internal/harness/provider/fault/circuit.go`, `internal/harness/provider/fault/fault_test.go`, `internal/harness/provider/fault/concurrency_test.go`, `internal/harness/provider/fault/mutation_test.go`, `internal/harness/provider/fault/benchmark_test.go`, `internal/harness/provider/router/router.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-015.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/router/...`; `go vet ./...`; `go test ./internal/harness/provider/fault -run '^$' -bench '^BenchmarkFaultClassifyAndDecide1000Operations$' -benchtime=1x -benchmem`; all 7 CI smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` 8 semantic fault kinds; parsing HTTP status codes and retry-after durations; rejection of blind failover on every failure (R-005); exponential backoff with jitter for transient/rate-limited errors; monotonic SQLite CAS circuit breaker state updates with probe cooldown deadlines; terminal failure for safety policy violations.  
+`REJECTED OPTIONS:` retrying safety policy violations, ignoring retry-after duration, unlimited retries on single provider, blind failover on all errors, non-transactional circuit updates.  
+`NEW PROCESS LEARNING:` integrating fault classification and circuit breaker updates directly into router execution lifecycle ensures full failure visibility and automated candidate filtering without manual intervention.
