@@ -77,6 +77,9 @@ jobs:
       - name: Provider read-only router smoke benchmark
         run: go test ./internal/harness/provider/router -run '^$' -bench '^BenchmarkReadOnlyRouterDispatch100Operations$' -benchtime=1x -benchmem
 
+      - name: Provider fault classification and retry smoke benchmark
+        run: go test ./internal/harness/provider/fault -run '^$' -bench '^BenchmarkFaultClassifyAndDecide1000Operations$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 

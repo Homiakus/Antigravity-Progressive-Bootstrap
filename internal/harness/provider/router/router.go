@@ -7,6 +7,7 @@ import (
 	"time"
 
 	harnessmodel "github.com/homiakus/agctl/internal/harness/model"
+	"github.com/homiakus/agctl/internal/harness/provider/fault"
 	"github.com/homiakus/agctl/internal/harness/provider/selector"
 	harnessstore "github.com/homiakus/agctl/internal/harness/store"
 	"github.com/homiakus/agctl/internal/harness/task"
@@ -30,6 +31,7 @@ type ReadOnlyExecutorFunc func(ctx context.Context, env harnessmodel.TaskEnvelop
 // Options configures the read-only router.
 type Options struct {
 	Policy         selector.Policy
+	FaultPolicy    fault.Policy
 	ReservationTTL time.Duration
 	Now            func() time.Time
 	IDGen          harnessmodel.IDGenerator
@@ -45,6 +47,9 @@ func (o *Options) normalize() {
 	if o.IDGen == nil {
 		o.IDGen = &harnessmodel.TimeSortableIDGenerator{Now: o.Now}
 	}
+	if o.FaultPolicy.Validate() != nil {
+		o.FaultPolicy = fault.DefaultPolicy()
+	}
 }
 
 // RouteResult captures the complete explainable routing decision and durable reservations.
@@ -59,12 +64,15 @@ type RouteResult struct {
 
 // ExecutionResult records the completed outcome of a read-only routed execution.
 type ExecutionResult struct {
-	Route      RouteResult
-	Success    bool
-	Output     string
-	TokensUsed int64
-	Duration   time.Duration
-	Error      string
+	Route         RouteResult
+	Success       bool
+	Output        string
+	TokensUsed    int64
+	Duration      time.Duration
+	Error         string
+	Fault         *fault.Classification
+	RetryAction   fault.RetryAction
+	FaultDecision *fault.Decision
 }
 
 // Router orchestrates automatic read-only provider routing.
@@ -267,6 +275,38 @@ func (r *Router) Execute(ctx context.Context, route RouteResult, exec ReadOnlyEx
 	}
 	if execErr != nil {
 		res.Error = execErr.Error()
+		c := fault.Classify(execErr)
+		res.Fault = &c
+
+		circuitMgr := fault.NewCircuitManager(r.store)
+		var currentCircuit *harnessmodel.ProviderCircuitState
+		if err := r.store.View(ctx, func(reader harnessstore.Reader) error {
+			cState, err := reader.GetProviderCircuitState(ctx, route.Assignment.AccountID, route.Assignment.ModelID)
+			if err == nil {
+				currentCircuit = &cState
+			}
+			return nil
+		}); err == nil {
+			dec, err := fault.Decide(fault.DecisionInput{
+				Fault:                c,
+				TotalAttempts:        1,
+				SameProviderAttempts: 1,
+				Circuit:              currentCircuit,
+				Policy:               r.opts.FaultPolicy,
+				Now:                  now,
+			})
+			if err == nil {
+				res.RetryAction = dec.Action
+				res.FaultDecision = &dec
+				if dec.TripCircuit {
+					_, _ = circuitMgr.RecordFailure(ctx, route.Assignment.AccountID, route.Assignment.ModelID, r.opts.FaultPolicy.CircuitFailureThreshold, r.opts.FaultPolicy.CircuitCooldown, now)
+				}
+			}
+		}
+	} else {
+		// On success, reset consecutive failures
+		circuitMgr := fault.NewCircuitManager(r.store)
+		_ = circuitMgr.RecordSuccess(ctx, route.Assignment.AccountID, route.Assignment.ModelID, now)
 	}
 
 	// Settle reservation FIRST, then assignment, maintaining active reservation invariants

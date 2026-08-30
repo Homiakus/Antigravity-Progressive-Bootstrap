@@ -347,8 +347,14 @@ func TestRouterExecutionFailure(t *testing.T) {
 	if result.Success {
 		t.Fatal("result.Success should be false")
 	}
+	if result.Fault == nil || result.Fault.Kind != "RATE_LIMITED" {
+		t.Fatalf("unexpected result.Fault: %+v", result.Fault)
+	}
+	if result.RetryAction == "" {
+		t.Fatal("result.RetryAction is empty")
+	}
 
-	// Verify assignment transitioned to FAILED and reservation RELEASED
+	// Verify assignment transitioned to RELEASED and reservation RELEASED
 	if err := db.View(ctx, func(r harnessstore.Reader) error {
 		asn, err := r.GetProviderAssignment(ctx, route.Assignment.ID)
 		if err != nil {
