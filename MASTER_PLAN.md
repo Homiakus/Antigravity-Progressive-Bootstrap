@@ -27,6 +27,7 @@ Current qualified milestones:
 - T-015 provider-aware failures and retries is implemented through `8d30f73` (pre-flight `1a17d88`). Provider errors are categorized into structured fault kinds, driving deterministic backoff, failover to alternative candidates, and transactional circuit breaker tripping.
 - T-016 safe provider handoff via existing `IN_DOUBT` is implemented through `4392d9d` (pre-flight `8940ead`). In-doubt side effects are checked and reconciled before replacement provider assignment, superseding prior assignments and releasing reservations atomically.
 - T-030 structural plan audit and process metrics generator is implemented through `98640db` (pre-flight `8636969`). Living plan headings, statuses, DAG acyclicity, finding severities, pre-flight existence, and context compression checkpoints are machine-verified and quantified.
+- T-017 isolated write routing is implemented through `eb276e1` (pre-flight `f09ed03`). Tasks that generate code or edits route safely to providers in isolated scratch workspaces (`WorkspaceSpec.Isolated == true`) with verified plan digests, capability matching, and symmetric SQLite ledger settlement.
 
 ## 2. Architecture
 
@@ -120,8 +121,8 @@ Orthogonal concepts MUST remain separate: `Worker`, `ProviderAccount`, `Provider
 T-009 provides normalized headroom, T-011 provides atomic feasibility/reservation, and T-012 integrates capacity and quota headroom into the deterministic selector decision matrix.
 
 ### F-002 — Codex is not yet a complete first-class execution provider
-**Status:** Resolved for read-only routing; write routing waits for T-017. **Severity:** High. **Confidence:** Confirmed.  
-Observation is first-class; TaskEnvelope and automatic read-only provider routing (T-013/T-014) execute read-only workloads across providers.
+**Status:** Resolved in T-014 and T-017. **Severity:** High. **Confidence:** Confirmed.  
+Observation is first-class; TaskEnvelope, automatic read-only provider routing (T-014), and isolated write provider routing (T-017) execute read-only and isolated code-generation workloads across providers. Commit coordination waits for T-018.
 
 ### F-003 — Workflow budget cannot substitute for provider quota
 **Status:** Resolved by T-010/T-011 boundary. **Severity:** High. **Confidence:** Confirmed.  
@@ -276,11 +277,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-030 publication:
+Priority after T-017 publication:
 
-1. **T-017 P1 / IN_PROGRESS** — enable isolated write routing.
-2. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
-3. **T-019 P0 / BLOCKED ON T-018** — enforce single-writer main policy.
+1. **T-018 P0 / NEXT** — add fenced Commit Coordinator.
+2. **T-019 P0 / BLOCKED ON T-018** — enforce single-writer main policy.
+3. **T-020 P1 / READY** — add provider diagnostics and agctl route explain.
 
 ## 7. Atomic Tasks
 
@@ -383,10 +384,11 @@ All applicable compatible native-metric quota windows are checked against comple
 **Status:** DONE. **Priority:** P0. Dependencies: T-013,T-015. Implementation `4392d9d` (pre-flight `8940ead`). In-doubt effects evaluated, reconciled, or rejected before replacement provider assignment; prior assignment superseded and prior reservation released in atomic CAS transaction; living plan drift verified; CI smoke benchmark `BenchmarkSafeProviderHandoff100Operations`.
 
 ### T-017 — Enable isolated write routing
-**Status:** IN_PROGRESS. **Priority:** P1. Pre-flight recorded in `.engineering/preflight/T-017.md`. Dependencies: T-016.
+**Status:** DONE. **Priority:** P1. Implementation `eb276e1` (pre-flight `f09ed03`). Dependencies: T-016.
+`WorkspaceSpec.Isolated` and `IsolationRoot` enforced in `internal/harness/model/task_envelope.go`; `RouteIsolatedWrite` and `ExecuteIsolatedWrite` implemented in `internal/harness/provider/router/router.go` with capability matching (`file_edit`), living-plan digest validation, active assignment/reservation transactions, and symmetric ledger lifecycle settlement. CI smoke benchmark `BenchmarkIsolatedWriteRouterDispatch100Operations` added to pipeline.
 
 ### T-018 — Add fenced Commit Coordinator
-**Status:** TODO. **Priority:** P0. Dependencies: T-017.
+**Status:** READY. **Priority:** P0. Dependencies: T-017.
 
 ### T-019 — Enforce single-writer main policy
 **Status:** TODO. **Priority:** P0. Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
@@ -523,6 +525,7 @@ Engineering-process path:
 - T-015 `8d30f73` (pre-flight `1a17d88`).
 - T-016 `4392d9d` (pre-flight `8940ead`).
 - T-030 `98640db` (pre-flight `8636969`).
+- T-017 `eb276e1` (pre-flight `f09ed03`).
 
 ## 13. Recent Iteration Log
 
@@ -610,26 +613,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./internal/engineering/...`, `go test -race ./internal/engineering/...`, `go test -race ./internal/harness/provider/...`, `go vet ./...`, all 9 smoke benchmarks, and Windows test suite.  
 **Plan result:** T-030 completed; T-017 (enable isolated write routing) is now READY / NEXT.
 
+### Iteration 21 — T-017
+**Selected task:** T-017 (enable isolated write routing) because it is P1, unblocked by T-016 and T-030, and establishes isolated workspace execution for code and edit generation tasks across providers.  
+**Characterization:** tasks producing code edits and file modifications must not execute against un-isolated production workspaces. `WorkspaceSpec` must enforce `Isolated: true` and non-empty `IsolationRoot` or `WorktreeID`. Router dispatches isolated write tasks with capability verification, atomic assignment/reservation commits, and symmetric ledger lifecycle settlement.  
+**Changes:** extended `WorkspaceSpec` in `internal/harness/model/task_envelope.go` with `Isolated`, `IsolationRoot`, `WriteLeaseID`, and fail-closed validation; implemented `RouteIsolatedWrite` and `ExecuteIsolatedWrite` in `internal/harness/provider/router/router.go`; added `BenchmarkIsolatedWriteRouterDispatch100Operations` to CI pipeline.  
+**Tests:** unit tests for write isolation validation, read-only rejection, plan drift rejection, successful isolated write execution with `IsolatedWriteOutput`, failure handling with fault classification and circuit updating; 64-way concurrent isolated write sentinel under `go test -race`; mutation tests killing defects.  
+**Mutation/test-of-tests:** sentinels kill mutants that admit un-isolated write workspaces, allow empty isolation roots, admit read-only envelopes in write route, bypass 1-char plan drift, leak reservations on failure, or allow double execution of settled routes.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkIsolatedWriteRouterDispatch100Operations` measures ~1.57 ms/op for 100 isolated write routes with SQLite ledger transactions (~15.7 µs/op). Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./internal/harness/provider/...`, `go test -race ./internal/harness/provider/...`, `go vet ./...`, all 10 smoke benchmarks, and Windows test suite.  
+**Plan result:** F-002 fully resolved for isolated writes; T-017 completed; T-018 (add fenced Commit Coordinator) is now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-030
+### Context Compression Checkpoint — after T-017
 
-`CURRENT HEAD:` T-030 pre-flight is `8636969`; implementation is `98640db`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, safe provider handoff with IN_DOUBT effect reconciliation, and automated living-plan structural auditing / process metrics are implemented, qualified and published.  
-`ARCHITECTURE:` `internal/engineering/audit.go` and `internal/engineering/metrics.go` provide structural governance, DAG cycle detection, ID uniqueness, allowed status enforcement, pre-flight file verification, and machine-readable velocity / completion metrics; `internal/harness/provider/handoff` safeguards multi-provider failover.  
+`CURRENT HEAD:` T-017 pre-flight is `f09ed03`; implementation is `eb276e1`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, safe provider handoff with IN_DOUBT effect reconciliation, automated living-plan structural auditing / process metrics, and isolated write provider routing are implemented, qualified and published.  
+`ARCHITECTURE:** `internal/harness/provider/router/router.go` routes isolated write tasks (`TaskClassCodegen`, etc.) to eligible providers with `file_edit`/`tools` capabilities strictly within designated `WorkspaceSpec.IsolationRoot` or `WorktreeID`, bound to cryptographic `PlanDigest`, with symmetric SQLite transaction commits and releases; `internal/harness/model/task_envelope.go` rejects un-isolated write workspaces.  
 `CRITICAL INVARIANTS:` I-001, I-002, I-005, I-006, I-007, I-008, I-009, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-037 plus R-005 no-blind-failover.  
-`COMPLETED THIS ITERATION:` T-030 implementation, qualification and living-plan reconciliation.  
-`RESOLVED FINDINGS:` none new; F-002 and F-013 solidified.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; residual F-002 write routing waits for T-017.  
-`BLOCKERS:` none for T-017.  
-`NEXT TASK:` T-017 — Enable isolated write routing.  
-`WHY NEXT:` T-017 is P1, unblocked by T-016 and T-030, and establishes isolated workspace environments for multi-provider write routing without mutating production files directly.  
-`CRITICAL FILES:` `internal/engineering/audit.go`, `internal/engineering/metrics.go`, `internal/engineering/audit_test.go`, `internal/engineering/metrics_test.go`, `internal/engineering/mutation_test.go`, `internal/engineering/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-030.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/engineering/...`; `go test -race ./internal/engineering/...`; `go test -race ./internal/harness/provider/...`; `go vet ./...`; `go test ./internal/engineering -run '^$' -bench '^BenchmarkAuditPlanMASTERPLAN$' -benchtime=1x -benchmem`; all 9 CI smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` automated structural linter enforces unique T/F IDs, canonical task/finding statuses, topological DAG acyclicity via Kahn's algorithm, presence of `.engineering/preflight/T-XXX.md` for in-progress tasks, and complete 15-field context compression checkpoints.  
-`REJECTED OPTIONS:` manual ad-hoc plan checking, permitting duplicate task/finding IDs, allowing dangling task dependencies, allowing cyclic dependencies, allowing unrecorded task execution without pre-flight.  
-`NEW PROCESS LEARNING:` integrating structural plan validation and machine-readable process metrics directly into automated test suites permanently eliminates documentation drift and ensures living plans remain executable and trustworthy.
+`COMPLETED THIS ITERATION:` T-017 implementation, qualification and living-plan reconciliation.  
+`RESOLVED FINDINGS:` F-002 resolved for both read-only and isolated write provider execution.  
+`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019.  
+`BLOCKERS:` none for T-018.  
+`NEXT TASK:` T-018 — Add fenced Commit Coordinator.  
+`WHY NEXT:` T-018 is P0, unblocked by T-017, and introduces the fenced Commit Coordinator to verify candidate diffs from isolated write executions before committing to the primary repository.  
+`CRITICAL FILES:` `internal/harness/model/task_envelope.go`, `internal/harness/provider/router/router.go`, `internal/harness/provider/router/router_test.go`, `internal/harness/provider/router/concurrency_test.go`, `internal/harness/provider/router/mutation_test.go`, `internal/harness/provider/router/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-017.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/router/...`; `go test -race ./internal/harness/provider/router/...`; `go test -race ./internal/harness/provider/...`; `go vet ./...`; `go test ./internal/harness/provider/router -run '^$' -bench 'Benchmark(ReadOnly|IsolatedWrite)RouterDispatch100Operations$' -benchtime=1x -benchmem`; all 10 CI smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` fail-closed enforcement of `WorkspaceSpec.Isolated == true` and non-empty `IsolationRoot`/`WorktreeID` for all non-read-only tasks; cryptographic living plan consistency verification (`task.CheckPlanDrift`); capability filtering requiring `file_edit` for write workloads.  
+`REJECTED OPTIONS:` allowing un-isolated writes to primary workspace, bypassing plan drift check on write routes, leaking reservations on execution errors, allowing multiple concurrent active assignments per attempt.  
+`NEW PROCESS LEARNING:` isolating worker write tasks to scratch environments guarantees that concurrent provider execution never pollutes or conflicts with the main working directory prior to coordinator commit fencing.
