@@ -529,9 +529,11 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
-## 15. Context Compression Checkpoint — after T-012
+## 15. Context Compression Checkpoint
 
-`CURRENT HEAD:` T-012 pre-flight is `38c3708`; implementation is `11c691d`.  
+### Context Compression Checkpoint — after T-012
+
+`CURRENT HEAD:` T-012 publication authority is `main@ce691ed9d4db1a40fa80ab490904aae5f3cbe359`; pre-flight is `38c3708`; implementation is `11c691d`.  
 `CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, and explainable shadow selector are implemented, qualified and published.  
 `ARCHITECTURE:` `provider/selector` owns pure deterministic provider selection, hard candidate filtering, multi-dimensional soft scoring, tie-breaking, and atomic StoreSource reading; integrates `provider/demand`, `provider/session`, `provider/capacity`, and `provider/reservation`.  
 `CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-018, I-020, I-021, I-023..I-027, I-033..I-037 plus I-008/I-009 publication fencing.  
@@ -544,4 +546,5 @@ No open Critical/High routing or engineering-control finding without explicit ac
 `CRITICAL FILES:` `internal/harness/provider/selector/selector.go`, `internal/harness/provider/selector/store_source.go`, `internal/harness/provider/selector/selector_test.go`, `internal/harness/provider/selector/benchmark_test.go`, `internal/harness/provider/session/broker.go`, `internal/harness/provider/demand/estimate.go`, `internal/harness/provider/reservation/service.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-012.md`, `MASTER_PLAN.md`.  
 `VERIFICATION COMMANDS:` `go test ./internal/harness/provider/selector`; `go test ./...`; `go test -race ./internal/harness/provider/selector`; `go vet ./...`; `go test ./internal/harness/provider/selector -run '^$' -bench '^BenchmarkSelectorEvaluate100Candidates$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`.  
 `IMPORTANT DECISIONS:` pure shadow selector without write leases; hard filters eliminate unviable candidates early with stable machine-readable reasons; multi-dimensional soft score combines headroom, reset horizon, session reuse bonus, reliability, switch penalty, and uncertainty penalty; strict tie-breaking across 8 dimensions ensures 100% deterministic candidate selection invariant to input order; single `Store.View` prevents torn snapshot across tables.  
-`REJECTED OPTIONS:` opaque scoring heuristics, hard-coded provider model names, cross-metric quota summing, ignoring circuit state, non-deterministic map iteration ordering.
+`REJECTED OPTIONS:` opaque scoring heuristics, hard-coded provider model names, cross-metric quota summing, ignoring circuit state, non-deterministic map iteration ordering.  
+`NEW PROCESS LEARNING:` the checkpoint heading must maintain three hashes `### Context Compression Checkpoint` and contain all 15 required fields for machine verification by agctl state complete.
