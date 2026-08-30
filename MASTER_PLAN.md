@@ -280,7 +280,7 @@ T029 complements, but does not replace, T018/T019.
 
 Priority after T-018 publication:
 
-1. **T-019 P0 / NEXT** — enforce single-writer main policy.
+1. **T-019 P0 / IN_PROGRESS** — enforce single-writer main policy.
 2. **T-020 P1 / READY** — add provider diagnostics and agctl route explain.
 3. **T-021 P2 / BLOCKED ON T-020** — add provider/quota dashboard.
 
@@ -393,7 +393,7 @@ All applicable compatible native-metric quota windows are checked against comple
 `CommitCoordinator` in `internal/harness/coordinator/coordinator.go` enforces typed `RoleCoordinator` authority (`AllowsCoordinatorAuthority`), rejects `RoleWorker` and untyped roles (`ErrUnauthorizedRole`), detects living-plan drift (`ErrPlanDrift`), blocks path traversal and leading-slash escapes (`ErrPathEscape`), safely copies verified files from `IsolationRoot` to `TargetRoot`, and computes deterministic tree SHA-256 digests. CI smoke benchmark `BenchmarkCommitCoordinatorApply100Operations` added to pipeline.
 
 ### T-019 — Enforce single-writer main policy
-**Status:** READY. **Priority:** P0. Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
+**Status:** IN_PROGRESS. **Priority:** P0. Pre-flight recorded in `.engineering/preflight/T-019.md`. Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
 
 ### T-020 — Add provider diagnostics and `agctl route explain`
 **Status:** TODO. **Priority:** P1. Dependencies: T-012.
