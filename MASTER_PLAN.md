@@ -278,7 +278,7 @@ T029 complements, but does not replace, T018/T019.
 
 Priority after T-030 publication:
 
-1. **T-017 P1 / NEXT** — enable isolated write routing.
+1. **T-017 P1 / IN_PROGRESS** — enable isolated write routing.
 2. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
 3. **T-019 P0 / BLOCKED ON T-018** — enforce single-writer main policy.
 
@@ -383,7 +383,7 @@ All applicable compatible native-metric quota windows are checked against comple
 **Status:** DONE. **Priority:** P0. Dependencies: T-013,T-015. Implementation `4392d9d` (pre-flight `8940ead`). In-doubt effects evaluated, reconciled, or rejected before replacement provider assignment; prior assignment superseded and prior reservation released in atomic CAS transaction; living plan drift verified; CI smoke benchmark `BenchmarkSafeProviderHandoff100Operations`.
 
 ### T-017 — Enable isolated write routing
-**Status:** READY. **Priority:** P1. Dependencies: T-016.
+**Status:** IN_PROGRESS. **Priority:** P1. Pre-flight recorded in `.engineering/preflight/T-017.md`. Dependencies: T-016.
 
 ### T-018 — Add fenced Commit Coordinator
 **Status:** TODO. **Priority:** P0. Dependencies: T-017.
