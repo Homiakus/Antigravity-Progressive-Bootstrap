@@ -34,20 +34,26 @@ func (s ProviderAssignmentState) Terminal() bool {
 // Account/model identity is immutable; SessionID may be bound once after a new
 // provider session is actually created.
 type ProviderAssignment struct {
-	ID        ProviderAssignmentID    `json:"id"`
-	AttemptID AttemptID               `json:"attemptId"`
-	AccountID ProviderAccountID       `json:"accountId"`
-	ModelID   ProviderModelID         `json:"modelId"`
-	SessionID ProviderSessionID       `json:"sessionId,omitempty"`
-	State     ProviderAssignmentState `json:"state"`
-	Revision  uint64                   `json:"revision"`
-	CreatedAt time.Time                `json:"createdAt"`
-	UpdatedAt time.Time                `json:"updatedAt"`
+	ID         ProviderAssignmentID    `json:"id"`
+	AttemptID  AttemptID               `json:"attemptId"`
+	AccountID  ProviderAccountID       `json:"accountId"`
+	ModelID    ProviderModelID         `json:"modelId"`
+	SessionID  ProviderSessionID       `json:"sessionId,omitempty"`
+	PlanDigest string                  `json:"planDigest,omitempty"`
+	State      ProviderAssignmentState `json:"state"`
+	Revision   uint64                  `json:"revision"`
+	CreatedAt  time.Time               `json:"createdAt"`
+	UpdatedAt  time.Time               `json:"updatedAt"`
 }
 
 func (a ProviderAssignment) Validate() error {
 	if a.ID == "" || a.AttemptID == "" || a.AccountID == "" || a.ModelID == "" {
 		return fmt.Errorf("provider assignment id, attempt id, account id and model id are required")
+	}
+	if a.PlanDigest != "" {
+		if err := ValidatePlanDigest(a.PlanDigest); err != nil {
+			return fmt.Errorf("provider assignment plan digest invalid: %w", err)
+		}
 	}
 	if !a.State.Valid() {
 		return fmt.Errorf("invalid provider assignment state %q", a.State)

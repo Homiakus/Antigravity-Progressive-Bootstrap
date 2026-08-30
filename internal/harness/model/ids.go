@@ -27,6 +27,7 @@ type ProviderAccountID string
 type ProviderSessionID string
 type ProviderAssignmentID string
 type ProviderReservationID string
+type TaskEnvelopeID string
 
 type IDKind string
 
@@ -47,6 +48,7 @@ const (
 	IDProviderSession     IDKind = "pses"
 	IDProviderAssignment  IDKind = "pasn"
 	IDProviderReservation IDKind = "pres"
+	IDTaskEnvelope        IDKind = "tenv"
 )
 
 var (

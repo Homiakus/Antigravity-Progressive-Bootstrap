@@ -23,8 +23,8 @@ func TestVersionFourteenToFifteenCreatesProviderRuntimeLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 15 {
-		t.Fatalf("schema version=%d want=15", version)
+	if version != SchemaVersion {
+		t.Fatalf("schema version=%d want=%d", version, SchemaVersion)
 	}
 	for _, table := range []string{"provider_assignments", "provider_reservations", "provider_usage_samples", "provider_circuit_state"} {
 		var got string

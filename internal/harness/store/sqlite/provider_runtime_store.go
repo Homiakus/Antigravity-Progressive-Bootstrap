@@ -11,7 +11,7 @@ import (
 )
 
 const providerAssignmentSelect = `
-SELECT id, attempt_id, account_id, model_id, session_id, state, revision, created_at, updated_at
+SELECT id, attempt_id, account_id, model_id, session_id, plan_digest, state, revision, created_at, updated_at
 FROM provider_assignments`
 
 func (t *transaction) GetProviderAssignment(ctx context.Context, id harnessmodel.ProviderAssignmentID) (harnessmodel.ProviderAssignment, error) {
@@ -59,9 +59,9 @@ func (t *transaction) CreateProviderAssignment(ctx context.Context, assignment h
 		return fmt.Errorf("provider assignment must start ACTIVE at revision 1")
 	}
 	_, err := t.tx.ExecContext(ctx, `
-INSERT INTO provider_assignments(id, attempt_id, account_id, model_id, session_id, state, revision, created_at, updated_at)
-VALUES(?,?,?,?,?,?,?,?,?)`, string(assignment.ID), string(assignment.AttemptID), string(assignment.AccountID), string(assignment.ModelID),
-		string(assignment.SessionID), string(assignment.State), assignment.Revision, formatTime(assignment.CreatedAt), formatTime(assignment.UpdatedAt))
+INSERT INTO provider_assignments(id, attempt_id, account_id, model_id, session_id, plan_digest, state, revision, created_at, updated_at)
+VALUES(?,?,?,?,?,?,?,?,?,?)`, string(assignment.ID), string(assignment.AttemptID), string(assignment.AccountID), string(assignment.ModelID),
+		string(assignment.SessionID), assignment.PlanDigest, string(assignment.State), assignment.Revision, formatTime(assignment.CreatedAt), formatTime(assignment.UpdatedAt))
 	if err != nil {
 		if _, activeErr := t.GetActiveProviderAssignment(ctx, assignment.AttemptID); activeErr == nil {
 			return fmt.Errorf("attempt %s already has an active provider assignment: %w", assignment.AttemptID, harnessstore.ErrConflict)
@@ -88,6 +88,12 @@ func (t *transaction) CompareAndSwapProviderAssignment(ctx context.Context, expe
 	if assignment.AttemptID != current.AttemptID || assignment.AccountID != current.AccountID || assignment.ModelID != current.ModelID || !assignment.CreatedAt.Equal(current.CreatedAt) {
 		return fmt.Errorf("provider assignment immutable identity changed: %w", harnessstore.ErrConflict)
 	}
+	if current.PlanDigest != "" && assignment.PlanDigest != "" && assignment.PlanDigest != current.PlanDigest {
+		return fmt.Errorf("provider assignment plan digest cannot be mutated: %w", harnessstore.ErrConflict)
+	}
+	if assignment.PlanDigest == "" {
+		assignment.PlanDigest = current.PlanDigest
+	}
 	if current.SessionID != "" && assignment.SessionID != current.SessionID {
 		return fmt.Errorf("provider assignment session is already bound: %w", harnessstore.ErrConflict)
 	}
@@ -108,8 +114,8 @@ func (t *transaction) CompareAndSwapProviderAssignment(ctx context.Context, expe
 	}
 	res, err := t.tx.ExecContext(ctx, `
 UPDATE provider_assignments
-SET session_id=?, state=?, revision=?, updated_at=?
-WHERE id=? AND revision=?`, string(assignment.SessionID), string(assignment.State), assignment.Revision, formatTime(assignment.UpdatedAt), string(assignment.ID), expectedRevision)
+SET session_id=?, plan_digest=?, state=?, revision=?, updated_at=?
+WHERE id=? AND revision=?`, string(assignment.SessionID), assignment.PlanDigest, string(assignment.State), assignment.Revision, formatTime(assignment.UpdatedAt), string(assignment.ID), expectedRevision)
 	if err != nil {
 		return fmt.Errorf("compare-and-swap provider assignment: %w", err)
 	}
@@ -121,8 +127,8 @@ WHERE id=? AND revision=?`, string(assignment.SessionID), string(assignment.Stat
 
 func scanProviderAssignment(row interface{ Scan(...any) error }) (harnessmodel.ProviderAssignment, error) {
 	var assignment harnessmodel.ProviderAssignment
-	var id, attemptID, accountID, modelID, sessionID, state, createdAt, updatedAt string
-	if err := row.Scan(&id, &attemptID, &accountID, &modelID, &sessionID, &state, &assignment.Revision, &createdAt, &updatedAt); err != nil {
+	var id, attemptID, accountID, modelID, sessionID, planDigest, state, createdAt, updatedAt string
+	if err := row.Scan(&id, &attemptID, &accountID, &modelID, &sessionID, &planDigest, &state, &assignment.Revision, &createdAt, &updatedAt); err != nil {
 		return harnessmodel.ProviderAssignment{}, mapNotFound(err)
 	}
 	assignment.ID = harnessmodel.ProviderAssignmentID(id)
@@ -130,6 +136,7 @@ func scanProviderAssignment(row interface{ Scan(...any) error }) (harnessmodel.P
 	assignment.AccountID = harnessmodel.ProviderAccountID(accountID)
 	assignment.ModelID = harnessmodel.ProviderModelID(modelID)
 	assignment.SessionID = harnessmodel.ProviderSessionID(sessionID)
+	assignment.PlanDigest = planDigest
 	assignment.State = harnessmodel.ProviderAssignmentState(state)
 	var err error
 	if assignment.CreatedAt, err = parseTime(createdAt); err != nil {

@@ -71,6 +71,9 @@ jobs:
       - name: Provider shadow selector smoke benchmark
         run: go test ./internal/harness/provider/selector -run '^$' -bench '^BenchmarkSelectorEvaluate100Candidates$' -benchtime=1x -benchmem
 
+      - name: Task envelope digest smoke benchmark
+        run: go test ./internal/harness/task -run '^$' -bench '^BenchmarkTaskEnvelopeDigest1000Operations$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 
