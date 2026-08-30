@@ -328,8 +328,8 @@ Priority after T-008 publication:
 All applicable compatible native-metric quota windows are checked against complete non-expired ACTIVE claims and reserved atomically with assignment creation using the existing Store transaction authority. Exact replay is idempotent; partial multi-window writes roll back. SQLite may use an equivalent complete SQL aggregate; non-SQLite Stores retain the complete unpaged fallback. No migration change.
 
 ### T-012 — Add explainable shadow selector
-**Status:** READY / NEXT. **Priority:** P0.  
-Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break; durable rationale. Dependencies T-008..T-011 are published and complete.
+**Status:** IN_PROGRESS. **Priority:** P0.  
+Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break; durable rationale. Dependencies T-008..T-011 are published and complete. Pre-flight established in `.engineering/preflight/T-012.md`.
 
 ### T-013 — Introduce TaskEnvelope and plan digest
 **Status:** TODO. **Priority:** P0. Dependencies: T-012.
