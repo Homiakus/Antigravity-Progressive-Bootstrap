@@ -26,6 +26,7 @@ Current qualified milestones:
 - T-014 automatic read-only provider routing is implemented through `e69c8e0` (pre-flight `ac7ecee`). Read-only tasks route automatically through selector and commit atomic assignments/reservations without workspace modification.
 - T-015 provider-aware failures and retries is implemented through `8d30f73` (pre-flight `1a17d88`). Provider errors are categorized into structured fault kinds, driving deterministic backoff, failover to alternative candidates, and transactional circuit breaker tripping.
 - T-016 safe provider handoff via existing `IN_DOUBT` is implemented through `4392d9d` (pre-flight `8940ead`). In-doubt side effects are checked and reconciled before replacement provider assignment, superseding prior assignments and releasing reservations atomically.
+- T-030 structural plan audit and process metrics generator is implemented through `98640db` (pre-flight `8636969`). Living plan headings, statuses, DAG acyclicity, finding severities, pre-flight existence, and context compression checkpoints are machine-verified and quantified.
 
 ## 2. Architecture
 
@@ -271,15 +272,15 @@ T011..T019 -> T023
 T014..T023 -> T024 -> T025 -> T026
 
 T027 DONE -> T028 DONE -> T029 DONE
-                    |-> T030 READY
+                    |-> T030 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-016 publication:
+Priority after T-030 publication:
 
-1. **T-030 P0 / IN_PROGRESS** — structural plan/process audit and enforcement of durable task-start ordering.
-2. **T-017 P1 / READY** — enable isolated write routing.
-3. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
+1. **T-017 P1 / NEXT** — enable isolated write routing.
+2. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
+3. **T-019 P0 / BLOCKED ON T-018** — enforce single-writer main policy.
 
 ## 7. Atomic Tasks
 
@@ -424,8 +425,8 @@ Mutate quota boundaries, demand percentile/source specificity, unit compatibilit
 **Status:** DONE. **Priority:** P0. Publication `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 
 ### T-030 — Add structural `MASTER_PLAN.md` audit and process metrics
-**Status:** IN_PROGRESS. **Priority:** P1. Pre-flight recorded in `.engineering/preflight/T-030.md`. Dependencies: T-027,T-028,T-029.
-Unique T/F IDs, allowed statuses, dependency validity, unknown-high finding detection, checkpoint recoverability and machine-readable process metrics. Hard-enforce that the first task-specific publication-lineage write persists selected T-XXX as `IN_PROGRESS` with pre-flight before production edits.
+**Status:** DONE. **Priority:** P1. Implementation `98640db` (pre-flight `8636969`). Dependencies: T-027,T-028,T-029.
+Unique T/F IDs, allowed statuses, dependency validity, DAG cycle detection, finding severity governance, pre-flight file existence checks, and machine-readable process metrics implemented in `internal/engineering/audit.go` and `internal/engineering/metrics.go`. CI smoke benchmark `BenchmarkAuditPlanMASTERPLAN` added to pipeline.
 
 ## 8. Verification, Mutation and Performance Policy
 
@@ -521,6 +522,7 @@ Engineering-process path:
 - T-014 `e69c8e0` (pre-flight `ac7ecee`).
 - T-015 `8d30f73` (pre-flight `1a17d88`).
 - T-016 `4392d9d` (pre-flight `8940ead`).
+- T-030 `98640db` (pre-flight `8636969`).
 
 ## 13. Recent Iteration Log
 
@@ -598,26 +600,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Verification:** clean technical tree passed `go test ./internal/harness/provider/handoff/...`, `go test -race ./internal/harness/provider/handoff/...`, `go test -race ./internal/harness/provider/fault/...`, `go test -race ./internal/harness/provider/router/...`, `go vet ./...`, all 8 smoke benchmarks, and Windows test suite.  
 **Plan result:** T-016 completed; T-030 and T-017 are now READY / NEXT.
 
+### Iteration 20 — T-030
+**Selected task:** T-030 (add structural `MASTER_PLAN.md` audit and process metrics) because it is P0, unblocked by T-027..T-029, and hardens living-plan structural integrity across task/finding headings, statuses, DAG dependencies, pre-flight presence, and checkpoint completeness.  
+**Characterization:** living plan governance requires automated machine validation to prevent structural drift, duplicate task/finding IDs, non-canonical status keywords, dangling or cyclic dependencies, unmapped high/critical findings, and missing pre-flight markers before task execution.  
+**Changes:** new `internal/engineering/audit.go` and `internal/engineering/metrics.go` with `AuditPlan`, `AuditPlanFile`, `PlanAuditReport`, `ComputeProcessMetrics`, `ProcessMetrics`; topological DAG cycle detection; pre-flight existence verification for in-progress tasks; CI smoke benchmark `BenchmarkAuditPlanMASTERPLAN`.  
+**Tests:** unit tests for minimal valid plans, live repository `MASTER_PLAN.md` audit, duplicate task/finding detection, status validation, dangling dependency detection, cyclic DAG detection, missing pre-flight verification; 64-way concurrent auditor sentinel; mutation tests killing defects.  
+**Mutation/test-of-tests:** sentinels kill mutants that admit duplicate IDs, non-canonical status strings, missing checkpoint fields, dangling dependencies, circular dependencies, or missing pre-flight files for in-progress tasks.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkAuditPlanMASTERPLAN` measures ~432 µs/op for auditing entire `MASTER_PLAN.md`; `BenchmarkComputeProcessMetrics` measures ~3.2 µs/op. Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./internal/engineering/...`, `go test -race ./internal/engineering/...`, `go test -race ./internal/harness/provider/...`, `go vet ./...`, all 9 smoke benchmarks, and Windows test suite.  
+**Plan result:** T-030 completed; T-017 (enable isolated write routing) is now READY / NEXT.
+
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
 ## 15. Context Compression Checkpoint
 
-### Context Compression Checkpoint — after T-016
+### Context Compression Checkpoint — after T-030
 
-`CURRENT HEAD:` T-016 pre-flight is `8940ead`; implementation is `4392d9d`.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, and safe provider handoff with IN_DOUBT effect reconciliation are implemented, qualified and published.  
-`ARCHITECTURE:` `internal/harness/provider/handoff` inspects attempt effect intents, checks blind-retry safety, invokes `EffectReconciler` for uncertain non-idempotent effects, verifies living-plan digests, and executes atomic CAS transitions (release prior reservation, supersede prior assignment, select replacement provider, create replacement active assignment and reservation) in SQLite; `internal/harness/provider/fault` and `internal/harness/provider/router` feed failover and handoff triggers.  
-`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-006, I-007, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-027, I-030..I-037 plus I-008/I-009 publication fencing, I-024 reservation CAS fencing, and R-005 no-blind-failover.  
-`COMPLETED THIS ITERATION:` T-016 implementation, qualification and living-plan reconciliation.  
+`CURRENT HEAD:` T-030 pre-flight is `8636969`; implementation is `98640db`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, explainable shadow selector, conversation-independent TaskEnvelope with plan digest binding, automatic read-only provider routing, provider-aware fault tolerance / circuit breaking, safe provider handoff with IN_DOUBT effect reconciliation, and automated living-plan structural auditing / process metrics are implemented, qualified and published.  
+`ARCHITECTURE:` `internal/engineering/audit.go` and `internal/engineering/metrics.go` provide structural governance, DAG cycle detection, ID uniqueness, allowed status enforcement, pre-flight file verification, and machine-readable velocity / completion metrics; `internal/harness/provider/handoff` safeguards multi-provider failover.  
+`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-006, I-007, I-008, I-009, I-010, I-011, I-013, I-018, I-020, I-021, I-023..I-037 plus R-005 no-blind-failover.  
+`COMPLETED THIS ITERATION:` T-030 implementation, qualification and living-plan reconciliation.  
 `RESOLVED FINDINGS:` none new; F-002 and F-013 solidified.  
 `OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; residual F-002 write routing waits for T-017.  
-`BLOCKERS:` none for T-030 or T-017.  
-`NEXT TASK:` T-030 — Structural plan/process audit and enforcement of durable task-start ordering (or T-017 — Enable isolated write routing).  
-`WHY NEXT:` T-030 hardens deterministic task startup order and plan conformance across CLI / control-plane; T-017 enables isolated write routing for non-destructive workspace writes.  
-`CRITICAL FILES:` `internal/harness/provider/handoff/handoff.go`, `internal/harness/provider/handoff/handoff_test.go`, `internal/harness/provider/handoff/concurrency_test.go`, `internal/harness/provider/handoff/mutation_test.go`, `internal/harness/provider/handoff/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-016.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/handoff/...`; `go test -race ./internal/harness/provider/handoff/...`; `go test -race ./internal/harness/provider/fault/...`; `go test -race ./internal/harness/provider/router/...`; `go vet ./...`; `go test ./internal/harness/provider/handoff -run '^$' -bench '^BenchmarkSafeProviderHandoff100Operations$' -benchtime=1x -benchmem`; all 8 CI smoke benchmarks; Windows `go test ./...`.  
-`IMPORTANT DECISIONS:` fail-closed rejection of handoffs with un-reconciled IN_DOUBT non-idempotent effects (I-007); atomic SQLite CAS transition releasing prior reservation before superseding prior assignment; living plan drift verification (ErrStalePlan); at most one ACTIVE assignment per attempt (I-023).  
-`REJECTED OPTIONS:` blind failover without inspecting in-flight effect intents, allowing handoff when reconciler returns unknown status for non-idempotent effects, deleting or rewriting prior assignment records, allowing multiple active assignments on single attempt.  
-`NEW PROCESS LEARNING:` ordering reservation release before assignment supersession strictly respects schema invariants and eliminates concurrent state conflicts during multi-entity lifecycle transitions.
+`BLOCKERS:` none for T-017.  
+`NEXT TASK:` T-017 — Enable isolated write routing.  
+`WHY NEXT:` T-017 is P1, unblocked by T-016 and T-030, and establishes isolated workspace environments for multi-provider write routing without mutating production files directly.  
+`CRITICAL FILES:` `internal/engineering/audit.go`, `internal/engineering/metrics.go`, `internal/engineering/audit_test.go`, `internal/engineering/metrics_test.go`, `internal/engineering/mutation_test.go`, `internal/engineering/benchmark_test.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-030.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/engineering/...`; `go test -race ./internal/engineering/...`; `go test -race ./internal/harness/provider/...`; `go vet ./...`; `go test ./internal/engineering -run '^$' -bench '^BenchmarkAuditPlanMASTERPLAN$' -benchtime=1x -benchmem`; all 9 CI smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` automated structural linter enforces unique T/F IDs, canonical task/finding statuses, topological DAG acyclicity via Kahn's algorithm, presence of `.engineering/preflight/T-XXX.md` for in-progress tasks, and complete 15-field context compression checkpoints.  
+`REJECTED OPTIONS:` manual ad-hoc plan checking, permitting duplicate task/finding IDs, allowing dangling task dependencies, allowing cyclic dependencies, allowing unrecorded task execution without pre-flight.  
+`NEW PROCESS LEARNING:` integrating structural plan validation and machine-readable process metrics directly into automated test suites permanently eliminates documentation drift and ensures living plans remain executable and trustworthy.
