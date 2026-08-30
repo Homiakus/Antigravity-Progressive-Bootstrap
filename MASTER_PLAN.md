@@ -277,7 +277,7 @@ T029 complements, but does not replace, T018/T019.
 
 Priority after T-016 publication:
 
-1. **T-030 P0 / READY** — structural plan/process audit and enforcement of durable task-start ordering.
+1. **T-030 P0 / IN_PROGRESS** — structural plan/process audit and enforcement of durable task-start ordering.
 2. **T-017 P1 / READY** — enable isolated write routing.
 3. **T-018 P0 / BLOCKED ON T-017** — add fenced Commit Coordinator.
 
@@ -424,8 +424,8 @@ Mutate quota boundaries, demand percentile/source specificity, unit compatibilit
 **Status:** DONE. **Priority:** P0. Publication `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 
 ### T-030 — Add structural `MASTER_PLAN.md` audit and process metrics
-**Status:** TODO. **Priority:** P1.  
-Unique T/F IDs, allowed statuses, dependency validity, unknown-high finding detection, checkpoint recoverability and machine-readable process metrics. Hard-enforce that the first task-specific publication-lineage write persists selected T-XXX as `IN_PROGRESS` with pre-flight before production edits. Dependencies: T-027,T-028,T-029.
+**Status:** IN_PROGRESS. **Priority:** P1. Pre-flight recorded in `.engineering/preflight/T-030.md`. Dependencies: T-027,T-028,T-029.
+Unique T/F IDs, allowed statuses, dependency validity, unknown-high finding detection, checkpoint recoverability and machine-readable process metrics. Hard-enforce that the first task-specific publication-lineage write persists selected T-XXX as `IN_PROGRESS` with pre-flight before production edits.
 
 ## 8. Verification, Mutation and Performance Policy
 
