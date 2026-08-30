@@ -279,7 +279,7 @@ T029 complements, but does not replace, T018/T019.
 
 Priority after T-017 publication:
 
-1. **T-018 P0 / NEXT** — add fenced Commit Coordinator.
+1. **T-018 P0 / IN_PROGRESS** — add fenced Commit Coordinator.
 2. **T-019 P0 / BLOCKED ON T-018** — enforce single-writer main policy.
 3. **T-020 P1 / READY** — add provider diagnostics and agctl route explain.
 
@@ -388,7 +388,7 @@ All applicable compatible native-metric quota windows are checked against comple
 `WorkspaceSpec.Isolated` and `IsolationRoot` enforced in `internal/harness/model/task_envelope.go`; `RouteIsolatedWrite` and `ExecuteIsolatedWrite` implemented in `internal/harness/provider/router/router.go` with capability matching (`file_edit`), living-plan digest validation, active assignment/reservation transactions, and symmetric ledger lifecycle settlement. CI smoke benchmark `BenchmarkIsolatedWriteRouterDispatch100Operations` added to pipeline.
 
 ### T-018 — Add fenced Commit Coordinator
-**Status:** READY. **Priority:** P0. Dependencies: T-017.
+**Status:** IN_PROGRESS. **Priority:** P0. Pre-flight recorded in `.engineering/preflight/T-018.md`. Dependencies: T-017.
 
 ### T-019 — Enforce single-writer main policy
 **Status:** TODO. **Priority:** P0. Dependencies: T-018. T-028/T-029 are precursors, not substitutes.
