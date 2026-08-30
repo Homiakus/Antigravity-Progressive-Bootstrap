@@ -378,7 +378,7 @@ All applicable compatible native-metric quota windows are checked against comple
 **Tests & Benchmarks:** matrix tests for all fault categories and decision outcomes; SQLite circuit breaker CAS tests; 64-way concurrent fault/circuit sentinel; mutation tests killing defect mutants. CI benchmark `BenchmarkFaultClassifyAndDecide1000Operations` added to pipeline.
 
 ### T-016 — Safe provider handoff via existing `IN_DOUBT`
-**Status:** TODO. **Priority:** P0. Dependencies: T-013,T-015.
+**Status:** IN_PROGRESS. **Priority:** P0. Dependencies: T-013,T-015. Pre-flight established in `.engineering/preflight/T-016.md`.
 
 ### T-017 — Enable isolated write routing
 **Status:** TODO. **Priority:** P1. Dependencies: T-016.
