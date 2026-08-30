@@ -89,6 +89,9 @@ jobs:
       - name: Living-plan structural audit smoke benchmark
         run: go test ./internal/engineering -run '^$' -bench '^BenchmarkAuditPlanMASTERPLAN$' -benchtime=1x -benchmem
 
+      - name: Fenced Commit Coordinator smoke benchmark
+        run: go test ./internal/harness/coordinator -run '^$' -bench '^BenchmarkCommitCoordinatorApply100Operations$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 

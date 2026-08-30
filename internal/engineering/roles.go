@@ -15,6 +15,15 @@ const (
 	RoleWorker      Role = "worker"
 )
 
+// AllowsCoordinatorAuthority returns true only if the role possesses coordinator commit/publication authority.
+func (r Role) AllowsCoordinatorAuthority() bool {
+	contract, err := ContractForRole(r)
+	if err != nil {
+		return false
+	}
+	return contract.Authority.CommitRepository && contract.Authority.PublishMain
+}
+
 // Authority is the executable description of which process-level actions a
 // role is allowed to own. It deliberately separates workspace mutation from
 // plan/main publication authority.
