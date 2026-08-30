@@ -80,6 +80,9 @@ jobs:
       - name: Provider fault classification and retry smoke benchmark
         run: go test ./internal/harness/provider/fault -run '^$' -bench '^BenchmarkFaultClassifyAndDecide1000Operations$' -benchtime=1x -benchmem
 
+      - name: Safe provider handoff smoke benchmark
+        run: go test ./internal/harness/provider/handoff -run '^$' -bench '^BenchmarkSafeProviderHandoff100Operations$' -benchtime=1x -benchmem
+
       - name: Stage 0 compiler smoke benchmarks
         run: go test ./internal/harness/compiler -run '^$' -bench 'BenchmarkCompile(Linear1K|Linear10K|DAG100K)$' -benchtime=1x -benchmem
 
