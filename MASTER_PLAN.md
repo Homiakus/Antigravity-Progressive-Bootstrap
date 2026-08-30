@@ -353,7 +353,7 @@ All applicable compatible native-metric quota windows are checked against comple
 **Tests & Benchmarks:** comprehensive unit tests, determinism tests invariant to field reordering, SQLite migration upgrade tests, 128-way concurrency sentinel, mutation tests killing defects. Smoke benchmark `BenchmarkTaskEnvelopeDigest1000Operations` measures ~3.5 µs/op (~3.5 ms for 1,000 operations). Added to CI pipeline.  
 
 ### T-014 — Enable automatic read-only provider routing
-**Status:** READY / NEXT. **Priority:** P1. Dependencies: T-011..T-013.
+**Status:** IN_PROGRESS. **Priority:** P1. Dependencies: T-011..T-013. Pre-flight established in `.engineering/preflight/T-014.md`.
 
 ### T-015 — Make failures/retries provider-aware
 **Status:** TODO. **Priority:** P1. Dependencies: T-014.
