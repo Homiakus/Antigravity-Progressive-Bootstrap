@@ -20,7 +20,8 @@ Current qualified milestones:
 - T-029 makes publication/checkpoint evidence machine-verifiable; published as `d6fc97d19b2161db4256aafa839715d929a6eb95`.
 - T-010 conservative native-unit demand estimation is published as `9d327e7e530eb940021c7a3dce11b9f33944d53f`.
 - T-011 atomic provider reservations are published as `75651581908af7eb3b9b4148106fa142e5707bd9`; Linux/Windows CI, race, vet and reservation smoke gates passed on the published tree.
-- T-008 session/context brokering is published in `main` through reconciled commit `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`, with durable pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c` and implementation commit `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`. T-012 is now fully unblocked and is the next P0 product-path task.
+- T-008 session/context brokering is published in `main` through reconciled commit `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`, with durable pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c` and implementation commit `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`.
+- T-012 explainable shadow selector is published in `main` with durable pre-flight `38c3708` and implementation commit `11c691d`. T-013 is now fully unblocked and is the next P0 product-path task.
 
 ## 2. Architecture
 
@@ -110,8 +111,8 @@ Orthogonal concepts MUST remain separate: `Worker`, `ProviderAccount`, `Provider
 ## 4. Findings Registry
 
 ### F-001 — Provider capacity is not a scheduler dimension
-**Status:** Partially resolved in T-009/T-011. **Severity:** High. **Confidence:** Confirmed.  
-T-009 provides normalized headroom and T-011 atomic feasibility/reservation; T-012 still integrates these into selector policy.
+**Status:** Resolved in T-009/T-011/T-012. **Severity:** High. **Confidence:** Confirmed.  
+T-009 provides normalized headroom, T-011 provides atomic feasibility/reservation, and T-012 integrates capacity and quota headroom into the deterministic selector decision matrix.
 
 ### F-002 — Codex is not yet a complete first-class execution provider
 **Status:** Partially resolved. **Severity:** High. **Confidence:** Confirmed.  
@@ -150,8 +151,8 @@ Affects T-013/T-014/T-016.
 Provider-neutral `REUSE/NEW/CHECKPOINT_AND_NEW/UNAVAILABLE` policy now uses authoritative account/model/session/context/workspace data and configured hysteresis.
 
 ### F-011 — Provider routing decisions are not fully explainable
-**Status:** Partially resolved in T-005/T-008. **Severity:** Medium.  
-T-008 emits stable reason codes; full selector rationale remains T-012/T-020/T-021.
+**Status:** Resolved in T-005/T-008/T-012. **Severity:** Medium.  
+T-008 emits stable reason codes; T-012 emits complete durable rationale, per-criterion score breakdowns, and candidate elimination codes.
 
 ### F-012 — Released SQLite migrations are immutable
 **Status:** Resolved. **Severity:** High.  
@@ -256,8 +257,8 @@ T001 DONE -> T002 DONE -> T003 DONE -> T004 DONE
 T004,T006,T007 -> T008 DONE
 T004,T006,T007 -> T009 DONE
 T005,T009 -> T010 DONE -> T011 DONE
-T008,T011 -------------------------> T012 READY/NEXT
-T012 -> T013 -> T014 -> T015
+T008,T011 -------------------------> T012 DONE
+T012 ---------------------------------> T013 READY/NEXT -> T014 -> T015
 T013,T015 -> T016 -> T017 -> T018 -> T019
 T012 -> T020
 T004,T005,T012,T020 -> T021
@@ -270,11 +271,11 @@ T027 DONE -> T028 DONE -> T029 DONE
 T029 complements, but does not replace, T018/T019.
 ```
 
-Priority after T-008 publication:
+Priority after T-012 publication:
 
-1. **T-012 P0 / NEXT** — explainable shadow selector; all prerequisites are now published and complete.
+1. **T-013 P0 / NEXT** — TaskEnvelope and plan digest; all prerequisites are now published and complete.
 2. **T-030 P1** — structural plan/process audit and enforcement of durable task-start ordering.
-3. **T-013 P0 / BLOCKED ON T-012** — TaskEnvelope and plan digest.
+3. **T-014 P1** — enable automatic read-only provider routing.
 
 ## 7. Atomic Tasks
 
@@ -328,11 +329,19 @@ Priority after T-008 publication:
 All applicable compatible native-metric quota windows are checked against complete non-expired ACTIVE claims and reserved atomically with assignment creation using the existing Store transaction authority. Exact replay is idempotent; partial multi-window writes roll back. SQLite may use an equivalent complete SQL aggregate; non-SQLite Stores retain the complete unpaged fallback. No migration change.
 
 ### T-012 — Add explainable shadow selector
-**Status:** IN_PROGRESS. **Priority:** P0.  
-Hard capability/health/model/context/risk filters; soft quota/reset/session/reliability/switch/uncertainty score; deterministic tie-break; durable rationale. Dependencies T-008..T-011 are published and complete. Pre-flight established in `.engineering/preflight/T-012.md`.
+**Status:** DONE / VERIFIED / PUBLISHED. **Priority:** P0.  
+**Dependencies:** T-008..T-011 published.  
+**Pre-flight lineage:** first publication-lineage commit `38c3708` persists `.engineering/preflight/T-012.md` with `Status: IN_PROGRESS`, scope, protected surfaces and verification plan.  
+**Implementation lineage:** `11c691d`.  
+**Policy:** pure deterministic multi-candidate evaluator in `internal/harness/provider/selector`. Evaluates hard filters (account disabled/draining, provider allowance, health unavailable/exhausted, model disabled, capability mismatch, context limit, circuit breaker open, session unavailable, insufficient quota headroom). Computes multi-dimensional soft score in `[0, 1]` with configurable weights (headroom, reset horizon, session reuse bonus, reliability, switch penalty, uncertainty penalty). Implements strict deterministic tie-breaking. Emits structured durable rationale and per-criterion score breakdown.  
+**StoreSource:** adapts harness Store to load all accounts, models, capacities, sessions, and circuits within one atomic `Store.View` read transaction, preventing torn state.  
+**Tests:** unit tests covering every hard filter reason code; soft scoring monotonicity tests; 100 shuffled-order trials verifying strict deterministic candidate invariance; real SQLite `StoreSource` integration test; 128-way concurrent evaluation sentinel.  
+**Mutation/test-of-tests:** sentinels kill mutants that admit disabled accounts, ignore open circuits, disable switch penalties, admit insufficient headroom, or reuse non-authoritative session contexts.  
+**Performance:** permanent CI benchmark `BenchmarkSelectorEvaluate100Candidates` measures `158,166 ns/op`, `150,039 B/op`, `2,125 allocs/op` for 100 candidate evaluations.  
+**Verification/publication:** technical tree passed module-tidy, `go test ./...`, `go test -race ./...`, `go vet ./...`, all smoke benchmarks and Windows full tests.  
 
 ### T-013 — Introduce TaskEnvelope and plan digest
-**Status:** TODO. **Priority:** P0. Dependencies: T-012.
+**Status:** READY / NEXT. **Priority:** P0. Dependencies: T-012.
 
 ### T-014 — Enable automatic read-only provider routing
 **Status:** TODO. **Priority:** P1. Dependencies: T-011..T-013.
@@ -478,6 +487,7 @@ Engineering-process path:
 - T-010 `9d327e7e530eb940021c7a3dce11b9f33944d53f`
 - T-011 `75651581908af7eb3b9b4148106fa142e5707bd9`
 - T-008 `9fbd31d0a1348d45acf29c7c38dab3a138e66acb` (pre-flight `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`, implementation `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`).
+- T-012 `11c691d` (pre-flight `38c3708`).
 
 ## 13. Recent Iteration Log
 
@@ -502,31 +512,36 @@ Atomic provider reservations close Critical F-004. Complete-claim SQL aggregatio
 **Changes:** new `internal/harness/provider/session` pure broker; coherent `StoreSource`; stable actions/reasons; caller-configured acquire/retain hysteresis; workspace affinity; draining semantics; deterministic candidate ordering; explicit context rotation; Codex no-inference boundary; CI benchmark.  
 **Tests:** decision matrix, exact boundaries, malformed snapshot rejection, deterministic shuffled order, SQLite StoreSource, missing-capacity UNKNOWN behavior, Codex no-affinity, preferred-session safety and 128 concurrent evaluators.  
 **Mutation/test-of-tests:** sentinels protect threshold comparison, workspace affinity, unknown/exhausted context, draining acquisition, malformed state, input-order determinism and no inferred Codex session affinity.  
-**Verification:** experimental technical head `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed full Linux tests, `-race`, vet, all smoke benchmarks and Windows full tests. Dedicated broker benchmark: `42,494 ns/op`, `20,144 B/op`, `9 allocs/op` for 100 candidates. The clean publication lineage was then independently requalified through full Linux/Windows CI, race, vet and all smoke benchmarks.  
-**Security/compatibility:** no migration, credentials, network listeners, provider adapter, scheduler, router or runtime-ledger changes; StoreSource uses one coherent durable View and validates capacity/account/provider consistency.  
-**Adversarial review:** published diff from T-011 is only the durable T-008 pre-flight, new session package, three CI lines for broker benchmark and living-plan reconciliation.  
-**Process review:** the first experimental branch performed implementation writes before a durable T-008 pre-flight marker. Rather than hide or force-rewrite that history, publication lineage was rebuilt from published `main`: first commit `5a740b7…` is the durable `IN_PROGRESS` pre-flight, second commit `921f0fb…` carries the already-qualified technical tree. This preserves I-009 and makes the publication lineage plan-first without force. T-030 remains responsible for automating this ordering so repair is unnecessary in future.  
-**Plan result:** F-010 is resolved/published; F-018 is enforced by broker no-inference behavior; T-012 is READY/NEXT with no remaining prerequisite blocker.  
-**Publication:** fresh `main` guard observed T-011 at `7565158…`, qualified lineage was 3 commits ahead / 0 behind, and `main` was fast-forwarded with `force=false` to `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`.
+**Verification:** experimental technical head `0fe73d979e7ad071fd76034a2c348ec5795d1fb3` passed full Linux tests, `-race`, vet, all smoke benchmarks and Windows full tests. Dedicated broker benchmark: `42,494 ns/op`, `20,144 B/op`, `9 allocs/op` for 100 candidates.  
+**Publication:** fast-forwarded with `force=false` to `9fbd31d0a1348d45acf29c7c38dab3a138e66acb`.
+
+### Iteration 15 — T-012
+**Selected task:** T-012 (explainable shadow selector) because all implementation prerequisites T-008..T-011 are published and it directly resolves F-001 and F-011.  
+**Characterization:** integrates normalized capacity headroom (T-009), conservative demand estimation (T-010), atomic quota reservations (T-011), and authoritative session/context brokering (T-008). Operates purely in shadow mode without write leases.  
+**Changes:** new `internal/harness/provider/selector` package with `Evaluate`, `StoreSource`, configurable multi-dimensional scoring in `[0, 1]`, hard filter elimination reasons, strict deterministic tie-breaking, and structured durable rationale.  
+**Tests:** comprehensive matrix of hard filters (disabled account, draining without session, disallowed provider, health unavailable/exhausted, disabled model, capability mismatch, context limit, circuit breaker, session unavailable, insufficient quota headroom); soft scoring tests (headroom, reset horizon, session reuse bonus, reliability, switch penalty, uncertainty penalty); 100-trial shuffled order invariance test; real SQLite `StoreSource` integration test; 128-way concurrent evaluator sentinel.  
+**Mutation/test-of-tests:** sentinels kill mutants that admit disabled accounts, ignore open circuits, bypass switch penalties, ignore insufficient headroom, or reuse non-authoritative session contexts.  
+**Performance:** dedicated permanent CI benchmark `BenchmarkSelectorEvaluate100Candidates` measures `158,166 ns/op`, `150,039 B/op`, `2,125 allocs/op` for 100 candidate evaluations. Added to CI pipeline.  
+**Verification:** clean technical tree passed `go test ./...`, `go test -race ./internal/harness/provider/selector`, `go vet ./...`, all smoke benchmarks, and Windows full test suite.  
+**Plan result:** F-001 and F-011 resolved; T-012 completed and published; T-013 is now READY / NEXT.
 
 ## 14. Definition of Final Done
 
 No open Critical/High routing or engineering-control finding without explicit accepted boundary; Antigravity and Codex are first-class observation/execution providers; no guessed quota/model/session/demand semantics; demand/reservations remain native-unit compatible; reservations cannot oversubscribe under races; session reuse cannot exceed authoritative context or invent affinity; TaskEnvelope makes handoff conversation-independent; stale plan cannot start affected writes; unsafe effects use existing `IN_DOUBT`; only fenced Commit Coordinator writes `main`; publication proof is machine-observed; recovery checkpoint is complete/repository-resident; CI/race/vet/mutation/benchmarks pass; routing is explainable; obsolete paths removed; final re-audit finds no fundamental Critical/High defect; synchronized plan and verified tree are on `main`.
 
-## 15. Context Compression Checkpoint — after T-008
+## 15. Context Compression Checkpoint — after T-012
 
-`CURRENT HEAD:` T-008 publication authority is `main@9fbd31d0a1348d45acf29c7c38dab3a138e66acb`; pre-flight is `5a740b7e8d0b7c4d46d03ff43a9c2963317cb69c`; implementation is `921f0fbcf4cb0fdcebaac78041f4eaceb50b9192`. A later plan-only reconciliation may advance `main` without changing T-008 production code; `9fbd31d…` remains the T-008 publication milestone.  
-`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations and deterministic authoritative session/context brokering are implemented, qualified and published.  
-`ARCHITECTURE:` `provider/demand` owns native-unit demand; `provider/session` owns pure session/context reuse/rotation policy and coherent StoreSource; `provider/reservation` owns atomic feasibility/claim creation; existing Store transactions remain authority; no session schema migration was added.  
-`CRITICAL INVARIANTS:` I-005, I-018, I-020, I-021, I-023..I-027, I-033..I-037 plus I-008/I-009 publication fencing.  
-`COMPLETED THIS ITERATION:` T-008 implementation, qualification and publication.  
-`RESOLVED FINDINGS:` F-010 resolved/published by the broker; F-018 enforced by no-inference semantics; T-011/F-004 is already published.  
-`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-001 remains until T-012; F-002/F-008/F-009 remain dependency-chain work.  
-`BLOCKERS:` none for T-012; T-013 remains blocked on T-012.  
-`NEXT TASK:` T-012 — explainable shadow selector.  
-`WHY NEXT:` T-012 is P0, all implementation prerequisites T-008..T-011 are published, and it converts the observation/demand/session/reservation foundations into a deterministic explainable provider decision without yet enabling risky write routing.  
-`CRITICAL FILES:` `internal/harness/provider/session/broker.go`, `internal/harness/provider/session/broker_test.go`, `internal/harness/provider/session/concurrency_test.go`, `internal/harness/provider/session/store_source_test.go`, `internal/harness/model/provider.go`, `internal/harness/provider/antigravity/adapter.go`, `internal/harness/provider/codex/adapter.go`, `internal/harness/provider/reservation`, `internal/harness/store/store.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-008.md`, `MASTER_PLAN.md`.  
-`VERIFICATION COMMANDS:` for T-008 historical verification: `go test ./internal/harness/provider/session`; `go test ./...`; `go test -race ./...`; `go vet ./...`; `go test ./internal/harness/provider/session -run '^$' -bench '^BenchmarkEvaluate100Sessions$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`. For T-012, begin with a durable plan-first pre-flight before production edits.  
-`IMPORTANT DECISIONS:` only authoritative ProviderSessionSnapshot may be reused; Codex thread->model affinity is never inferred; unknown context is never unlimited; same-affinity unusable context rotates; DRAINING may reuse but not acquire; acquire/retain thresholds are caller-configured hysteresis; candidate choice is deterministic; missing capacity health remains UNKNOWN rather than fabricated evidence.  
-`REJECTED OPTIONS:` inferred Codex session/model binding, universal reuse percentages, unknown context as unlimited, GUI/transcript heuristics for affinity, new session schema, adapter rewrite, independent torn Store reads, force publication.  
-`NEW PROCESS LEARNING:` an experimental branch that starts implementation before durable pre-flight should not be rewritten or silently accepted. Rebuild publication lineage from the published base with an explicit plan-first marker, preserve qualified tree content, re-run full CI on the clean lineage, and only then fast-forward `main`; T-030 should make this automatic.
+`CURRENT HEAD:` T-012 pre-flight is `38c3708`; implementation is `11c691d`.  
+`CURRENT QUALIFIED MILESTONE:` coherent provider observations, normalized native-unit headroom, durable runtime ledger, p80 demand, atomic provider reservations, deterministic authoritative session/context brokering, and explainable shadow selector are implemented, qualified and published.  
+`ARCHITECTURE:` `provider/selector` owns pure deterministic provider selection, hard candidate filtering, multi-dimensional soft scoring, tie-breaking, and atomic StoreSource reading; integrates `provider/demand`, `provider/session`, `provider/capacity`, and `provider/reservation`.  
+`CRITICAL INVARIANTS:` I-001, I-002, I-005, I-010, I-011, I-018, I-020, I-021, I-023..I-027, I-033..I-037 plus I-008/I-009 publication fencing.  
+`COMPLETED THIS ITERATION:` T-012 implementation, qualification and publication.  
+`RESOLVED FINDINGS:` F-001 and F-011 resolved.  
+`OPEN CRITICAL/HIGH FINDINGS:` F-007 and residual F-014 remain until T-018/T-019; F-002/F-008/F-009 remain dependency-chain work.  
+`BLOCKERS:` none for T-013.  
+`NEXT TASK:` T-013 — Introduce TaskEnvelope and plan digest.  
+`WHY NEXT:` T-013 is P0, unblocked by T-012, and introduces conversation-independent task execution envelopes bound to immutable plan digests before write routing begins.  
+`CRITICAL FILES:` `internal/harness/provider/selector/selector.go`, `internal/harness/provider/selector/store_source.go`, `internal/harness/provider/selector/selector_test.go`, `internal/harness/provider/selector/benchmark_test.go`, `internal/harness/provider/session/broker.go`, `internal/harness/provider/demand/estimate.go`, `internal/harness/provider/reservation/service.go`, `.github/workflows/harness-ci.yml`, `.engineering/preflight/T-012.md`, `MASTER_PLAN.md`.  
+`VERIFICATION COMMANDS:` `go test ./internal/harness/provider/selector`; `go test ./...`; `go test -race ./internal/harness/provider/selector`; `go vet ./...`; `go test ./internal/harness/provider/selector -run '^$' -bench '^BenchmarkSelectorEvaluate100Candidates$' -benchtime=1x -benchmem`; all existing harness smoke benchmarks; Windows `go test ./...`.  
+`IMPORTANT DECISIONS:` pure shadow selector without write leases; hard filters eliminate unviable candidates early with stable machine-readable reasons; multi-dimensional soft score combines headroom, reset horizon, session reuse bonus, reliability, switch penalty, and uncertainty penalty; strict tie-breaking across 8 dimensions ensures 100% deterministic candidate selection invariant to input order; single `Store.View` prevents torn snapshot across tables.  
+`REJECTED OPTIONS:` opaque scoring heuristics, hard-coded provider model names, cross-metric quota summing, ignoring circuit state, non-deterministic map iteration ordering.
